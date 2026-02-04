@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Download, FileText, Image as ImageIcon, AlertCircle, X, Loader, Plus, Trash2, Save, Settings, Key, BarChart3, PieChart, FolderInput, RotateCcw, Eye, Cpu, Server, WifiOff, ListPlus, Eraser } from 'lucide-react';
 
-const DEFAULT_LOCAL_URL = "http://localhost:8000/extract";
+// URL Ngrok của bạn - Đã cập nhật làm mặc định cho mọi người dùng
+const DEFAULT_LOCAL_URL = "https://unoratorical-geophysical-jarrod.ngrok-free.dev/extract";
 
 export default function VietnameseFormExtractor() {
   const [files, setFiles] = useState([]);
@@ -13,18 +14,18 @@ export default function VietnameseFormExtractor() {
   const [isDragging, setIsDragging] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
   
-  // Configuration
+  // Cấu hình
   const [serverUrl, setServerUrl] = useState(DEFAULT_LOCAL_URL);
   const [showSettings, setShowSettings] = useState(false);
   const [isServerActive, setIsServerActive] = useState(false);
   
-  // New State: Should we append data or clear it?
+  // Chế độ kết quả: Nối tiếp (Append) hay Thay thế (Replace)
   const [appendMode, setAppendMode] = useState(true);
 
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
 
-  // Load SheetJS
+  // Tải thư viện SheetJS
   useEffect(() => {
     const script = document.createElement('script');
     script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
@@ -32,10 +33,14 @@ export default function VietnameseFormExtractor() {
     script.onload = () => setIsXLSXLoaded(true);
     document.body.appendChild(script);
 
+    // Logic ưu tiên: 
+    // 1. Nếu người dùng đã từng lưu URL khác trong LocalStorage, dùng cái đó (để bạn test localhost dễ dàng).
+    // 2. Nếu là người dùng mới tinh, dùng DEFAULT_LOCAL_URL (Ngrok).
     const savedUrl = localStorage.getItem('local_ocr_server_url');
-    if (savedUrl) setServerUrl(savedUrl);
-
-    checkServerHealth(savedUrl || DEFAULT_LOCAL_URL);
+    const urlToUse = savedUrl || DEFAULT_LOCAL_URL;
+    
+    setServerUrl(urlToUse);
+    checkServerHealth(urlToUse);
 
     return () => {
       if (document.body.contains(script)) {
@@ -52,6 +57,7 @@ export default function VietnameseFormExtractor() {
 
   const checkServerHealth = async (url) => {
       try {
+          // Kiểm tra server bằng cách ping vào root /
           await fetch(url.replace('/extract', '/'), { method: 'GET' });
           setIsServerActive(true);
       } catch (e) {
@@ -59,18 +65,20 @@ export default function VietnameseFormExtractor() {
       }
   };
 
+  // Định nghĩa cột (Đã Việt hóa hoàn toàn label)
   const columns = [
-    { key: 'source_file', label: 'File Source', type: 'readonly', width: 'min-w-[160px]' },
-    { key: 'doc_type', label: 'Type (Loại)', type: 'text', width: 'min-w-[100px]' },
-    { key: 'date', label: 'Date (Ngày)', type: 'text', width: 'min-w-[110px]' },
-    { key: 'id', label: 'ID (Số phiếu)', type: 'text', width: 'min-w-[120px]' },
-    { key: 'name', label: 'Deliverer (Người giao)', type: 'text', width: 'min-w-[200px]' },
-    { key: 'description', label: 'Item Name (Tên hàng)', type: 'text', width: 'min-w-[350px]' },
-    { key: 'code', label: 'Code (Mã số)', type: 'text', width: 'min-w-[120px]' },
-    { key: 'unit', label: 'Unit (ĐVT)', type: 'text', width: 'min-w-[80px]' },
-    { key: 'quantity', label: 'Qty (SL)', type: 'number', width: 'min-w-[90px]' },
-    { key: 'unitprice', label: 'Price (Đơn giá)', type: 'number', width: 'min-w-[130px]' },
-    { key: 'totalprice', label: 'Total (Thành tiền)', type: 'number', width: 'min-w-[140px]' }
+    { key: 'source_file', label: 'Tệp nguồn', type: 'readonly', width: 'min-w-[160px]' },
+    { key: 'doc_type', label: 'Loại chứng từ', type: 'text', width: 'min-w-[100px]' },
+    { key: 'date', label: 'Ngày chứng từ', type: 'text', width: 'min-w-[110px]' },
+    { key: 'id', label: 'Số phiếu', type: 'text', width: 'min-w-[120px]' },
+    { key: 'name', label: 'Người giao/Đơn vị', type: 'text', width: 'min-w-[200px]' },
+    { key: 'description', label: 'Tên hàng hoá', type: 'text', width: 'min-w-[350px]' },
+    { key: 'order_numbers', label: 'Số đơn hàng', type: 'text', width: 'min-w-[150px]' },
+    { key: 'code', label: 'Mã hàng', type: 'text', width: 'min-w-[120px]' },
+    { key: 'unit', label: 'ĐVT', type: 'text', width: 'min-w-[80px]' },
+    { key: 'quantity', label: 'Số lượng', type: 'number', width: 'min-w-[90px]' },
+    { key: 'unitprice', label: 'Đơn giá', type: 'number', width: 'min-w-[130px]' },
+    { key: 'totalprice', label: 'Thành tiền', type: 'number', width: 'min-w-[140px]' }
   ];
 
   const standardizeData = (rawData) => {
@@ -112,9 +120,9 @@ export default function VietnameseFormExtractor() {
     );
     
     if (validFiles.length === 0 && uploadedFiles.length > 0) {
-        setError('No valid files found. Only PDF and Images are allowed.');
+        setError('Không tìm thấy tệp hợp lệ. Chỉ chấp nhận PDF và Hình ảnh.');
     } else if (validFiles.length !== uploadedFiles.length) {
-        setError('Some files were skipped. Only PDF and Images are allowed.');
+        setError('Một số tệp đã bị bỏ qua. Chỉ chấp nhận PDF và Hình ảnh.');
     } else {
         setError('');
     }
@@ -158,26 +166,26 @@ export default function VietnameseFormExtractor() {
 
   const processFiles = async () => {
     if (files.length === 0) {
-      setError('Please upload at least one file');
+      setError('Vui lòng tải lên ít nhất một tệp tin');
       return;
     }
 
     setIsProcessing(true);
     setError('');
     
-    // Clear data immediately if NOT in append mode
+    // Xóa dữ liệu nếu không ở chế độ nối tiếp
     if (!appendMode) {
         setExtractedData([]);
     }
 
-    setStatusMessage('Connecting to local server...');
-    const currentBatchData = []; // Store only data from this run
+    setStatusMessage('Đang kết nối máy chủ...');
+    const currentBatchData = []; 
     let hasErrorOccurred = false;
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        setStatusMessage(`Sending file ${i + 1}/${files.length} to Local AI: ${file.name}...`);
+        setStatusMessage(`Đang xử lý tệp ${i + 1}/${files.length}: ${file.name}...`);
         
         const formData = new FormData();
         formData.append('file', file);
@@ -190,7 +198,7 @@ export default function VietnameseFormExtractor() {
 
             if (!response.ok) {
                 const errText = await response.text();
-                throw new Error(`Server Error (${response.status}): ${errText}`);
+                throw new Error(`Lỗi máy chủ (${response.status}): ${errText}`);
             }
 
             const result = await response.json();
@@ -211,37 +219,34 @@ export default function VietnameseFormExtractor() {
             }
 
         } catch (e) {
-            console.error("Processing failed for file", file.name, e);
+            console.error("Xử lý thất bại cho tệp", file.name, e);
             hasErrorOccurred = true;
-            setError(prev => prev + `\nFailed to process ${file.name}: ${e.message}`);
+            setError(prev => prev + `\nLỗi khi xử lý ${file.name}: ${e.message}`);
             
             if (e.message.includes("Failed to fetch")) {
-                setError("Could not connect to Local Server. Is 'server.py' running? Check Settings.");
+                setError("Không thể kết nối đến Máy chủ Local. Bạn đã chạy 'server.py' chưa? Hãy kiểm tra trong Cài đặt.");
                 break; 
             }
         }
       }
 
-      // Update state based on mode
       setExtractedData(prev => {
           if (appendMode) {
               return [...prev, ...currentBatchData];
           } else {
-              // If we are in Replace mode, we already cleared at the start, 
-              // but we set it here to be safe and ensure we only have the new batch
               return currentBatchData;
           }
       });
       
       if (currentBatchData.length === 0 && !hasErrorOccurred) {
-         setError('No structured data returned by the server.');
+         setError('Máy chủ không trả về dữ liệu nào.');
       } else {
           setFiles([]);
       }
 
     } catch (err) {
-      console.error('Global Processing error:', err);
-      setError(`Error: ${err.message}`);
+      console.error('Lỗi tổng:', err);
+      setError(`Lỗi: ${err.message}`);
     } finally {
       setIsProcessing(false);
       setStatusMessage('');
@@ -249,40 +254,37 @@ export default function VietnameseFormExtractor() {
   };
 
   const exportToExcel = () => {
-    if (!isXLSXLoaded || !window.XLSX) {
-      setError("Export library is still loading. Please try again in a moment.");
-      return;
-    }
-    
+    if (!window.XLSX) return;
     const wb = window.XLSX.utils.book_new();
     const cleanData = extractedData.map(({ file_ref, ...rest }) => rest);
+    
+    // Phân nhóm theo loại chứng từ
+    const groups = { 'Hoá đơn': [], 'Nhập kho': [], 'Xuất kho': [], 'Khác': [] };
+    
+    cleanData.forEach(item => {
+        if (item.doc_type === 'Invoice') groups['Hoá đơn'].push(item);
+        else if (item.doc_type === 'Import') groups['Nhập kho'].push(item);
+        else if (item.doc_type === 'Export') groups['Xuất kho'].push(item);
+        else groups['Khác'].push(item);
+    });
 
-    const invoices = cleanData.filter(i => i.doc_type === 'Invoice');
-    const imports = cleanData.filter(i => i.doc_type === 'Import');
-    const exports = cleanData.filter(i => i.doc_type === 'Export');
-    const others = cleanData.filter(i => !['Invoice', 'Import', 'Export'].includes(i.doc_type));
+    Object.entries(groups).forEach(([name, data]) => {
+        if (data.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(data), name);
+    });
 
-    if (invoices.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(invoices), 'Invoices');
-    if (imports.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(imports), 'Warehouse Imports');
-    if (exports.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(exports), 'Warehouse Releases');
-    if (others.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(others), 'Others');
-    if (wb.SheetNames.length === 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(cleanData), 'All Data');
-
-    window.XLSX.writeFile(wb, `extractor-data-${new Date().toISOString().slice(0,10)}.xlsx`);
+    if (wb.SheetNames.length === 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(cleanData), 'Tất cả');
+    window.XLSX.writeFile(wb, `ket-qua-trich-xuat.xlsx`);
   };
 
   const exportToCSV = () => {
-    if (!isXLSXLoaded || !window.XLSX) {
-      setError("Export library is still loading. Please try again in a moment.");
-      return;
-    }
+    if (!window.XLSX) return;
     const cleanData = extractedData.map(({ file_ref, ...rest }) => rest);
     const ws = window.XLSX.utils.json_to_sheet(cleanData);
     const csv = window.XLSX.utils.sheet_to_csv(ws);
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `extractor-data-${new Date().toISOString().slice(0,10)}.csv`;
+    link.download = `ket-qua-trich-xuat.csv`;
     link.click();
   };
 
@@ -304,7 +306,7 @@ export default function VietnameseFormExtractor() {
   };
 
   const clearAll = () => {
-    if(window.confirm("Are you sure you want to clear all data?")) {
+    if(window.confirm("Bạn có chắc muốn xóa toàn bộ dữ liệu?")) {
         setFiles([]);
         setExtractedData([]);
         setError('');
@@ -329,16 +331,16 @@ export default function VietnameseFormExtractor() {
           <div>
             <h1 className="text-2xl font-bold text-indigo-700 flex items-center gap-2">
               <FileText className="w-8 h-8" />
-              Extractor (Local AI)
+              Trích xuất Hóa đơn & Chứng từ
             </h1>
-            <p className="text-slate-500 mt-1">Extract Vietnamese Forms using Local Server (Ollama)</p>
+            <p className="text-slate-500 mt-1">Xử lý tự động Hoá đơn, Phiếu nhập/xuất kho</p>
           </div>
           <div className="mt-4 md:mt-0 flex gap-3 items-center">
              
-             {/* Server Status Badge */}
-             <div className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium shadow-sm ${isServerActive ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`} title={isServerActive ? "Local Server is connected" : "Cannot connect to Local Server"}>
+             {/* Trạng thái Server */}
+             <div className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium shadow-sm ${isServerActive ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`} title={isServerActive ? "Đã kết nối máy chủ" : "Mất kết nối máy chủ"}>
                 <div className={`w-2.5 h-2.5 rounded-full ${isServerActive ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                <span>{isServerActive ? "Server Active" : "Server Offline"}</span>
+                <span>{isServerActive ? "Máy chủ Online" : "Máy chủ Offline"}</span>
              </div>
 
              <button 
@@ -346,17 +348,17 @@ export default function VietnameseFormExtractor() {
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-slate-100 text-slate-700 hover:bg-slate-200`}
              >
                 <Settings className="w-4 h-4" />
-                Settings
+                Cài đặt
              </button>
              {extractedData.length > 0 && (
                 <button onClick={clearAll} className="px-4 py-2 text-sm text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors font-medium">
-                    Reset All
+                    Xóa tất cả
                 </button>
              )}
           </div>
         </div>
 
-        {/* File Preview Modal */}
+        {/* Xem trước tệp */}
         {previewFile && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 p-4 sm:p-8 animate-in fade-in" onClick={() => setPreviewFile(null)}>
                 <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden relative" onClick={e => e.stopPropagation()}>
@@ -374,13 +376,13 @@ export default function VietnameseFormExtractor() {
                             <iframe 
                                 src={URL.createObjectURL(previewFile)} 
                                 className="w-full h-full rounded-lg border border-slate-200 shadow-sm"
-                                title="PDF Preview"
+                                title="Xem trước PDF"
                             ></iframe>
                         ) : (
                             <img 
                                 src={URL.createObjectURL(previewFile)} 
                                 className="max-w-full max-h-full object-contain rounded-lg shadow-sm"
-                                alt="Preview"
+                                alt="Xem trước"
                             />
                         )}
                     </div>
@@ -388,12 +390,12 @@ export default function VietnameseFormExtractor() {
             </div>
         )}
 
-        {/* Settings Panel */}
+        {/* Bảng Cài đặt */}
         {showSettings && (
           <div className="bg-white p-6 rounded-xl shadow-lg border border-indigo-100 animate-in fade-in slide-in-from-top-4">
              <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                   <Server className="w-5 h-5 text-indigo-500" /> Local Server Config
+                   <Server className="w-5 h-5 text-indigo-500" /> Cấu hình Máy chủ Local
                 </h3>
                 <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
                    <X className="w-5 h-5" />
@@ -402,7 +404,7 @@ export default function VietnameseFormExtractor() {
              
              {/* Server URL Input */}
              <div className="space-y-3 mb-6">
-                <label className="block text-sm font-medium text-slate-700">Python Server URL</label>
+                <label className="block text-sm font-medium text-slate-700">Đường dẫn Server Python</label>
                 <div className="flex gap-2">
                    <input 
                       type="text"
@@ -415,25 +417,25 @@ export default function VietnameseFormExtractor() {
                       onClick={() => checkServerHealth(serverUrl)}
                       className="px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100 flex items-center gap-2"
                    >
-                      <RotateCcw className="w-3 h-3" /> Test
+                      <RotateCcw className="w-3 h-3" /> Kiểm tra
                    </button>
                 </div>
                 <p className="text-xs text-slate-500">
-                   Requires a running Python backend with Ollama.
+                   Yêu cầu máy chủ Python (server.py) đang chạy song song.
                 </p>
              </div>
           </div>
         )}
 
-        {/* Main Content Area */}
+        {/* Nội dung chính */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           
-          {/* Left Panel: Upload & Controls */}
+          {/* Cột trái: Upload & Nút bấm */}
           <div className="lg:col-span-1 space-y-6">
             
             {/* Upload Box */}
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                <h3 className="font-semibold text-slate-800 mb-4">1. Upload Documents</h3>
+                <h3 className="font-semibold text-slate-800 mb-4">1. Tải lên tài liệu</h3>
                 <div 
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
@@ -445,67 +447,99 @@ export default function VietnameseFormExtractor() {
                         }`}
                 >
                     <Upload className={`w-10 h-10 mb-3 transition-colors ${isDragging ? 'text-indigo-600' : 'text-indigo-400 group-hover:text-indigo-600'}`} />
+                    
                     <div className="flex flex-col gap-2 items-center w-full">
                         <button 
                             onClick={() => fileInputRef.current?.click()}
                             className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-medium hover:bg-indigo-50 transition shadow-sm w-full max-w-[200px] flex items-center justify-center gap-2"
                         >
-                            <FileText className="w-4 h-4" /> Select Files
+                            <FileText className="w-4 h-4" /> Chọn Tệp tin
                         </button>
-                        <div className="flex items-center gap-2 text-slate-400 text-xs w-full justify-center"><span className="h-px bg-slate-300 w-10"></span><span>or</span><span className="h-px bg-slate-300 w-10"></span></div>
+                        
+                        <div className="flex items-center gap-2 text-slate-400 text-xs w-full justify-center">
+                            <span className="h-px bg-slate-300 w-10"></span>
+                            <span>hoặc</span>
+                            <span className="h-px bg-slate-300 w-10"></span>
+                        </div>
+
                         <button 
                             onClick={() => folderInputRef.current?.click()}
                             className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-medium hover:bg-indigo-50 transition shadow-sm w-full max-w-[200px] flex items-center justify-center gap-2"
                         >
-                            <FolderInput className="w-4 h-4" /> Select Folder
+                            <FolderInput className="w-4 h-4" /> Chọn Thư mục
                         </button>
                     </div>
-                    <span className="text-xs text-slate-400 mt-4 text-center">Drag & Drop files or folders here</span>
+
+                    <span className="text-xs text-slate-400 mt-4 text-center">Kéo & Thả tệp hoặc thư mục vào đây</span>
                 </div>
                 
                 {/* Inputs */}
-                <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,image/*" multiple onChange={handleFileUpload} />
-                <input ref={folderInputRef} type="file" className="hidden" {...{ webkitdirectory: "", directory: "" }} multiple onChange={handleFileUpload} />
+                <input 
+                    ref={fileInputRef}
+                    type="file" 
+                    className="hidden" 
+                    accept=".pdf,image/*" 
+                    multiple 
+                    onChange={handleFileUpload} 
+                />
+                <input 
+                    ref={folderInputRef}
+                    type="file" 
+                    className="hidden"
+                    {...{ webkitdirectory: "", directory: "" }} 
+                    multiple
+                    onChange={handleFileUpload}
+                />
 
-                {/* File List */}
+                {/* Danh sách file */}
                 {files.length > 0 && (
                     <div className="mt-4 space-y-2 max-h-60 overflow-y-auto">
                         {files.map((file, idx) => (
-                            <div key={idx} onClick={() => handlePreviewFile(file)} className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-100 text-sm cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 transition-colors group">
+                            <div 
+                                key={idx} 
+                                onClick={() => handlePreviewFile(file)}
+                                className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-100 text-sm cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 transition-colors group"
+                                title="Bấm để xem trước"
+                            >
                                 <div className="flex items-center gap-2 overflow-hidden">
                                     {file.type.includes('pdf') ? <FileText className="w-4 h-4 text-red-500 flex-shrink-0"/> : <ImageIcon className="w-4 h-4 text-blue-500 flex-shrink-0"/>}
                                     <span className="truncate text-slate-600 group-hover:text-indigo-700">{file.name}</span>
                                 </div>
-                                <button onClick={(e) => { e.stopPropagation(); removeFile(idx); }} className="text-slate-400 hover:text-red-500 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); removeFile(idx); }} 
+                                    className="text-slate-400 hover:text-red-500 p-1 hover:bg-red-50 rounded"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
                             </div>
                         ))}
                     </div>
                 )}
             </div>
 
-            {/* Mode Switcher */}
+            {/* Chế độ kết quả */}
             <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
                 <span className="text-sm font-medium text-slate-700 flex items-center gap-2">
                     {appendMode ? <ListPlus className="w-4 h-4 text-blue-500" /> : <Eraser className="w-4 h-4 text-orange-500" />}
-                    Result Mode:
+                    Chế độ:
                 </span>
                 <div className="flex bg-slate-100 p-1 rounded-lg">
                     <button 
                         onClick={() => setAppendMode(true)}
                         className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${appendMode ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
-                        Append
+                        Nối tiếp
                     </button>
                     <button 
                         onClick={() => setAppendMode(false)}
                         className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${!appendMode ? 'bg-white text-orange-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
-                        Replace
+                        Thay thế
                     </button>
                 </div>
             </div>
 
-            {/* Action Buttons */}
+            {/* Nút Bắt đầu */}
             <button
                 onClick={processFiles}
                 disabled={isProcessing || files.length === 0}
@@ -513,27 +547,42 @@ export default function VietnameseFormExtractor() {
                     ${isProcessing || files.length === 0 ? 'bg-slate-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-md'}`}
             >
                 {isProcessing ? <Loader className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                {isProcessing ? 'Start Extraction' : 'Start Extraction'}
+                {isProcessing ? 'Bắt đầu Trích xuất' : 'Bắt đầu Trích xuất'}
             </button>
             
-            {statusMessage && <div className="text-xs text-center text-slate-500 animate-pulse">{statusMessage}</div>}
-            {error && <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-xl text-sm flex items-start gap-2"><AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" /><span>{error}</span></div>}
+            {statusMessage && (
+                <div className="text-xs text-center text-slate-500 animate-pulse">{statusMessage}</div>
+            )}
+
+            {error && (
+                <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-xl text-sm flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                </div>
+            )}
+
           </div>
 
-          {/* Right Panel: Data Table */}
+          {/* Cột phải: Bảng kết quả */}
           <div className="lg:col-span-3">
              <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col h-full min-h-[500px]">
                 
                 {/* Table Header Controls */}
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-3 justify-between items-center bg-slate-50/50 rounded-t-xl">
                     <div className="flex items-center gap-2">
-                        <span className="font-semibold text-slate-700">Results Table</span>
-                        <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-1 rounded-full">{extractedData.length} items</span>
+                        <span className="font-semibold text-slate-700">Bảng kết quả</span>
+                        <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-1 rounded-full">{extractedData.length} mục</span>
                     </div>
                     <div className="flex gap-2">
-                        <button onClick={addRow} className="flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-50 text-sm transition"><Plus className="w-4 h-4" /> Add Row</button>
-                        <button onClick={exportToCSV} disabled={extractedData.length === 0} className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 text-sm transition disabled:opacity-50"><FileText className="w-4 h-4" /> CSV</button>
-                        <button onClick={exportToExcel} disabled={extractedData.length === 0} className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm transition shadow-sm disabled:opacity-50 disabled:shadow-none"><Download className="w-4 h-4" /> Excel</button>
+                        <button onClick={addRow} className="flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-50 text-sm transition">
+                            <Plus className="w-4 h-4" /> Thêm dòng
+                        </button>
+                        <button onClick={exportToCSV} disabled={extractedData.length === 0} className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 text-sm transition disabled:opacity-50">
+                            <FileText className="w-4 h-4" /> Xuất CSV
+                        </button>
+                        <button onClick={exportToExcel} disabled={extractedData.length === 0} className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm transition shadow-sm disabled:opacity-50 disabled:shadow-none">
+                            <Download className="w-4 h-4" /> Xuất Excel
+                        </button>
                     </div>
                 </div>
 
@@ -542,7 +591,7 @@ export default function VietnameseFormExtractor() {
                     {extractedData.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3 min-h-[300px]">
                             {isServerActive ? <FileText className="w-8 h-8 text-slate-300" /> : <WifiOff className="w-10 h-10 text-red-200" />}
-                            <p>{isServerActive ? "Ready to extract using Local AI." : "Local Server is offline. Please run 'server.py'."}</p>
+                            <p>{isServerActive ? "Sẵn sàng trích xuất." : "Máy chủ Offline. Vui lòng chạy 'server.py'."}</p>
                         </div>
                     ) : (
                         <div className="border rounded-lg overflow-auto flex-grow bg-white shadow-sm">
@@ -551,7 +600,9 @@ export default function VietnameseFormExtractor() {
                                     <tr>
                                         <th className="w-10 px-3 py-3"></th>
                                         {columns.map(col => (
-                                            <th key={col.key} className={`px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 ${col.width || ''}`}>{col.label}</th>
+                                            <th key={col.key} className={`px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 ${col.width || ''}`}>
+                                                {col.label}
+                                            </th>
                                         ))}
                                     </tr>
                                 </thead>
@@ -559,14 +610,29 @@ export default function VietnameseFormExtractor() {
                                     {extractedData.map((row, rowIndex) => (
                                         <tr key={rowIndex} className="hover:bg-indigo-50/30 transition-colors group">
                                             <td className="px-2 py-2 text-center">
-                                                <button onClick={() => deleteRow(rowIndex)} className="text-slate-300 hover:text-red-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                                <button onClick={() => deleteRow(rowIndex)} className="text-slate-300 hover:text-red-500 transition-colors">
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
                                             </td>
                                             {columns.map(col => (
                                                 <td key={col.key} className="px-2 py-1">
                                                     {col.key === 'source_file' ? (
-                                                        <button onClick={() => handlePreviewFile(row.file_ref)} className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs font-medium truncate max-w-[140px] hover:underline" title={row[col.key]}><Eye className="w-3 h-3 flex-shrink-0" /><span className="truncate">{row[col.key]}</span></button>
+                                                        <button 
+                                                            onClick={() => handlePreviewFile(row.file_ref)}
+                                                            className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs font-medium truncate max-w-[140px] hover:underline"
+                                                            title={row[col.key]}
+                                                        >
+                                                            <Eye className="w-3 h-3 flex-shrink-0" />
+                                                            <span className="truncate">{row[col.key]}</span>
+                                                        </button>
                                                     ) : (
-                                                        <input type={col.type} value={row[col.key] || ''} onChange={(e) => updateRow(rowIndex, col.key, e.target.value)} className="w-full px-2 py-1.5 text-sm border-transparent bg-transparent rounded focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 transition-all outline-none text-slate-700 min-w-full" placeholder="..." />
+                                                        <input
+                                                            type={col.type}
+                                                            value={row[col.key] || ''}
+                                                            onChange={(e) => updateRow(rowIndex, col.key, e.target.value)}
+                                                            className="w-full px-2 py-1.5 text-sm border-transparent bg-transparent rounded focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 transition-all outline-none text-slate-700 min-w-full"
+                                                            placeholder="..."
+                                                        />
                                                     )}
                                                 </td>
                                             ))}
