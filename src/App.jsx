@@ -67,13 +67,14 @@ export default function VietnameseFormExtractor() {
 
   // Định nghĩa cột (Đã Việt hóa hoàn toàn label)
   const columns = [
+    { key: 'stt', label: 'STT', type: 'readonly', width: 'w-[50px] text-center' }, // Cột STT mới
     { key: 'source_file', label: 'Tệp nguồn', type: 'readonly', width: 'min-w-[160px]' },
     { key: 'doc_type', label: 'Loại chứng từ', type: 'text', width: 'min-w-[100px]' },
     { key: 'date', label: 'Ngày chứng từ', type: 'text', width: 'min-w-[110px]' },
     { key: 'id', label: 'Số phiếu', type: 'text', width: 'min-w-[120px]' },
     { key: 'name', label: 'Người giao/Đơn vị', type: 'text', width: 'min-w-[200px]' },
     { key: 'description', label: 'Tên hàng hoá', type: 'text', width: 'min-w-[350px]' },
-    { key: 'order_numbers', label: 'Số đơn hàng', type: 'text', width: 'min-w-[150px]' },
+    { key: 'order_numbers', label: 'Số đơn hàng/Serial', type: 'text', width: 'min-w-[150px]' },
     { key: 'code', label: 'Mã hàng', type: 'text', width: 'min-w-[120px]' },
     { key: 'unit', label: 'ĐVT', type: 'text', width: 'min-w-[80px]' },
     { key: 'quantity', label: 'Số lượng', type: 'number', width: 'min-w-[90px]' },
@@ -204,18 +205,46 @@ export default function VietnameseFormExtractor() {
             const result = await response.json();
             const parsedData = result.data || result;
 
-            const injectFileInfo = (data) => data.map(item => ({ 
-                ...item, 
-                source_file: file.name, 
-                file_ref: file 
-            }));
+            // Hàm xử lý làm phẳng (Flatten) dữ liệu dựa trên mã đơn hàng
+            const flattenAndInjectInfo = (data) => {
+                return data.flatMap(item => {
+                    const orderNums = item.order_numbers;
+                    
+                    // Nếu order_numbers là mảng và có nhiều hơn 0 phần tử
+                    if (Array.isArray(orderNums) && orderNums.length > 0) {
+                        
+                        // Kiểm tra xem số lượng mã có khớp với số lượng hàng hóa không (Smart Check)
+                        // Nếu Khớp: Chia đều số lượng là 1 cho mỗi dòng, Thành tiền = Đơn giá
+                        const isCountMatch = typeof item.quantity === 'number' && item.quantity === orderNums.length;
+
+                        return orderNums.map(orderNum => ({
+                            ...item,
+                            source_file: file.name,
+                            file_ref: file,
+                            order_numbers: orderNum, // Gán từng mã riêng lẻ
+                            // Nếu khớp số lượng, mỗi dòng là 1 cái. Nếu không, giữ nguyên (để người dùng tự sửa)
+                            quantity: isCountMatch ? 1 : item.quantity,
+                            totalprice: isCountMatch ? item.unitprice : item.totalprice
+                        }));
+                    }
+                    
+                    // Trường hợp mặc định (không có mã đơn hoặc mảng rỗng)
+                    return [{
+                        ...item,
+                        source_file: file.name,
+                        file_ref: file,
+                        // Đảm bảo là chuỗi để hiển thị
+                        order_numbers: Array.isArray(item.order_numbers) ? item.order_numbers.join(", ") : item.order_numbers
+                    }];
+                });
+            };
 
             if (Array.isArray(parsedData)) {
                 const standardized = standardizeData(parsedData);
-                currentBatchData.push(...injectFileInfo(standardized));
+                currentBatchData.push(...flattenAndInjectInfo(standardized));
             } else {
                 const standardized = standardizeData([parsedData]);
-                currentBatchData.push(...injectFileInfo(standardized));
+                currentBatchData.push(...flattenAndInjectInfo(standardized));
             }
 
         } catch (e) {
@@ -261,29 +290,33 @@ export default function VietnameseFormExtractor() {
     // Phân nhóm theo loại chứng từ
     const groups = { 'Hoá đơn': [], 'Nhập kho': [], 'Xuất kho': [], 'Khác': [] };
     
-    cleanData.forEach(item => {
-        if (item.doc_type === 'Invoice') groups['Hoá đơn'].push(item);
-        else if (item.doc_type === 'Import') groups['Nhập kho'].push(item);
-        else if (item.doc_type === 'Export') groups['Xuất kho'].push(item);
-        else groups['Khác'].push(item);
+    cleanData.forEach((item, index) => {
+        // Thêm STT vào dữ liệu xuất Excel
+        const itemWithStt = { stt: index + 1, ...item };
+        if (item.doc_type === 'Invoice') groups['Hoá đơn'].push(itemWithStt);
+        else if (item.doc_type === 'Import') groups['Nhập kho'].push(itemWithStt);
+        else if (item.doc_type === 'Export') groups['Xuất kho'].push(itemWithStt);
+        else groups['Khác'].push(itemWithStt);
     });
 
     Object.entries(groups).forEach(([name, data]) => {
         if (data.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(data), name);
     });
 
-    if (wb.SheetNames.length === 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(cleanData), 'Tất cả');
+    // Thêm STT cho sheet tổng
+    const allDataWithStt = cleanData.map((item, index) => ({ stt: index + 1, ...item }));
+    if (wb.SheetNames.length === 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(allDataWithStt), 'Tất cả');
     window.XLSX.writeFile(wb, `ket-qua-trich-xuat.xlsx`);
   };
 
   const exportToCSV = () => {
     if (!window.XLSX) return;
-    const cleanData = extractedData.map(({ file_ref, ...rest }) => rest);
+    // Thêm STT cho CSV
+    const cleanData = extractedData.map(({ file_ref, ...rest }, index) => ({ stt: index + 1, ...rest }));
     const ws = window.XLSX.utils.json_to_sheet(cleanData);
     const csv = window.XLSX.utils.sheet_to_csv(ws);
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
+    link.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }));
     link.download = `ket-qua-trich-xuat.csv`;
     link.click();
   };
@@ -333,7 +366,7 @@ export default function VietnameseFormExtractor() {
               <FileText className="w-8 h-8" />
               Trích xuất Hóa đơn & Chứng từ
             </h1>
-            <p className="text-slate-500 mt-1">Xử lý tự động Hoá đơn, Phiếu nhập/xuất kho</p>
+            <p className="text-slate-500 mt-1">Xử lý tự động Hoá đơn, Phiếu nhập/xuất kho (Local AI)</p>
           </div>
           <div className="mt-4 md:mt-0 flex gap-3 items-center">
              
@@ -591,11 +624,11 @@ export default function VietnameseFormExtractor() {
                     {extractedData.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3 min-h-[300px]">
                             {isServerActive ? <FileText className="w-8 h-8 text-slate-300" /> : <WifiOff className="w-10 h-10 text-red-200" />}
-                            <p>{isServerActive ? "Sẵn sàng trích xuất." : "Máy chủ Offline. Vui lòng chạy 'server.py'."}</p>
+                            <p>{isServerActive ? "Sẵn sàng trích xuất (Local)." : "Máy chủ Offline. Vui lòng chạy 'server.py'."}</p>
                         </div>
                     ) : (
                         <div className="border rounded-lg overflow-auto flex-grow bg-white shadow-sm">
-                            <table className="min-w-max w-full divide-y divide-slate-200">
+                            <table className="min-w-max w-full divide-y divide-slate-200 text-sm">
                                 <thead className="bg-slate-50 sticky top-0 z-10">
                                     <tr>
                                         <th className="w-10 px-3 py-3"></th>
@@ -607,16 +640,18 @@ export default function VietnameseFormExtractor() {
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white divide-y divide-slate-200">
-                                    {extractedData.map((row, rowIndex) => (
-                                        <tr key={rowIndex} className="hover:bg-indigo-50/30 transition-colors group">
+                                    {extractedData.map((row, idx) => (
+                                        <tr key={idx} className="hover:bg-indigo-50/30 transition-colors group">
                                             <td className="px-2 py-2 text-center">
-                                                <button onClick={() => deleteRow(rowIndex)} className="text-slate-300 hover:text-red-500 transition-colors">
+                                                <button onClick={() => deleteRow(idx)} className="text-slate-300 hover:text-red-500 transition-colors">
                                                     <Trash2 className="w-4 h-4" />
                                                 </button>
                                             </td>
                                             {columns.map(col => (
                                                 <td key={col.key} className="px-2 py-1">
-                                                    {col.key === 'source_file' ? (
+                                                    {col.key === 'stt' ? (
+                                                        <div className="text-center text-slate-500 font-medium text-xs">{idx + 1}</div>
+                                                    ) : col.key === 'source_file' ? (
                                                         <button 
                                                             onClick={() => handlePreviewFile(row.file_ref)}
                                                             className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs font-medium truncate max-w-[140px] hover:underline"
@@ -629,7 +664,7 @@ export default function VietnameseFormExtractor() {
                                                         <input
                                                             type={col.type}
                                                             value={row[col.key] || ''}
-                                                            onChange={(e) => updateRow(rowIndex, col.key, e.target.value)}
+                                                            onChange={(e) => updateRow(idx, col.key, e.target.value)}
                                                             className="w-full px-2 py-1.5 text-sm border-transparent bg-transparent rounded focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 transition-all outline-none text-slate-700 min-w-full"
                                                             placeholder="..."
                                                         />
