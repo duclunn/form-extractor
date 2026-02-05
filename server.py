@@ -29,7 +29,7 @@ if not API_KEY:
     raise RuntimeError("API_KEY is not set")
 MODEL_NAME = "gemini-2.5-flash-lite"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
-
+print(GEMINI_URL)
 # PROMPT (Giữ nguyên theo yêu cầu)
 SYSTEM_PROMPT = """
 You are an expert OCR engine. Analyze the image and extract data into JSON.
