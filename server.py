@@ -8,7 +8,7 @@ import re
 from PIL import Image
 import io
 import fitz  # PyMuPDF: Dùng để xử lý PDF
-
+import os
 # Initialize FastAPI
 app = FastAPI()
 
@@ -23,9 +23,11 @@ app.add_middleware(
 
 # --- CONFIGURATION ---
 # API Key của bạn (Lấy từ lịch sử chat)
-GEMINI_API_KEY = "REDACTED"
+API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    raise RuntimeError("API_KEY is not set")
 MODEL_NAME = "gemini-2.5-flash-lite"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
 
 # PROMPT (Giữ nguyên theo yêu cầu)
 SYSTEM_PROMPT = """
