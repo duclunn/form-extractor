@@ -11,7 +11,8 @@ import fitz  # PyMuPDF: Dùng để xử lý PDF
 import os
 # Initialize FastAPI
 app = FastAPI()
-
+from dotenv import load_dotenv
+load_dotenv()
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
