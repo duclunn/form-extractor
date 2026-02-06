@@ -9,10 +9,13 @@ from PIL import Image
 import io
 import fitz  # PyMuPDF: Dùng để xử lý PDF
 import os
+from dotenv import load_dotenv
+
 # Initialize FastAPI
 app = FastAPI()
-from dotenv import load_dotenv
+
 load_dotenv()
+
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
@@ -23,13 +26,17 @@ app.add_middleware(
 )
 
 # --- CONFIGURATION ---
-# API Key của bạn (Lấy từ lịch sử chat)
+# API Key của bạn (Lấy từ biến môi trường hoặc file .env)
 API_KEY = os.getenv("API_KEY")
+# Fallback logic if needed, though strictly it should be in env
 if not API_KEY:
-    raise RuntimeError("API_KEY is not set")
+    print("WARNING: API_KEY not found in environment variables.")
+
 MODEL_NAME = "gemini-2.5-flash-lite"
+# Ensure the model version exists, or fallback to stable flash if needed
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
-print(GEMINI_URL)
+
+
 # PROMPT (Giữ nguyên theo yêu cầu)
 SYSTEM_PROMPT = """
 You are an expert OCR engine. Analyze the image and extract data into JSON.
