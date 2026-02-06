@@ -35,9 +35,9 @@ if not API_KEY:
 MODEL_NAME = "gemini-2.5-flash-lite"
 # Ensure the model version exists, or fallback to stable flash if needed
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
+print(f"Targeting Gemini URL: {GEMINI_URL}")
 
-
-# PROMPT (Giữ nguyên theo yêu cầu)
+# PROMPT (Updated: Strict Column Mapping)
 SYSTEM_PROMPT = """
 You are an expert OCR engine. Analyze the image and extract data into JSON.
 
@@ -47,11 +47,20 @@ You are an expert OCR engine. Analyze the image and extract data into JSON.
 - **id**: Document Number (Số phiếu).
 - **name**: Deliverer/Supplier Name.
 - **unit**: Unit (e.g., Cái, Kg).
-- **quantity**: Number.
 - **unitprice**: Number.
 - **totalprice**: Number.
 
-### 2. SMART DESCRIPTION & ORDER NUMBER PARSING (CRITICAL)
+### 2. QUANTITY COLUMNS (STRICT MAPPING)
+Vietnamese warehouse forms (Phiếu Xuất/Nhập Kho) typically have two quantity columns side-by-side:
+| Yêu cầu (1) | Thực Nhập/Xuất (2) |
+
+- **quantity_doc**: Number or null. This corresponds to column (1) "Yêu cầu". If this visual column is blank, return `null`.
+- **quantity_actual**: Number or null. This corresponds to column (2) "Thực nhập" or "Thực xuất". If this visual column is blank, return `null`.
+
+**CRITICAL RULE:** - If the "Yêu cầu" column is empty, and "Thực Xuất" has a number (e.g. 5), you MUST return: `{"quantity_doc": null, "quantity_actual": 5}`.
+- DO NOT put the actual quantity into `quantity_doc`.
+
+### 3. SMART DESCRIPTION & ORDER NUMBER PARSING
 You must separate the Item Description from the Serial/Order Numbers.
 
 **Field: `description`**
@@ -63,39 +72,18 @@ You must separate the Item Description from the Serial/Order Numbers.
 - **Prefix Logic:** If a list is "25B827, 828, 621", apply the prefix "25B" to all numbers -> ["25B827", "25B828", "25B621"].
 - **Range Logic:** If a range is "25B834-->838" or "25B834-838", expand it -> ["25B834", "25B835", "25B836", "25B837", "25B838"].
 
-### 3. EXAMPLE SCENARIOS
-**Input Text:** "MBA 560KVA-22/0,4KV 25B834-->836"
+### 4. EXAMPLE SCENARIOS
+**Input Image:** Table row shows Column "Yêu cầu" is empty. Column "Thực Xuất" is 10. Description contains codes 25B834 to 25B838 and 25B840 to 25B844.
 **Output:**
 {
-  "description": "MBA 560KVA-22/0,4KV",
-  "order_numbers": ["25B834", "25B835", "25B836"]
-}
-
-**Input Text:** "MBA 320KVA - 22/0,4KV 25B827, 828"
-**Output:**
-{
-  "description": "MBA 320KVA - 22/0,4KV",
-  "order_numbers": ["25B827", "25B828"]
+  "description": "MBA 560KVA - 22/0,4KV",
+  "order_numbers": ["25B834", "25B835", "25B836", "25B837", "25B838", "25B840", "25B841", "25B842", "25B843", "25B844"],
+  "quantity_doc": null,
+  "quantity_actual": 10
 }
 
 ### OUTPUT FORMAT:
 Return ONLY a raw JSON Array. Do not include markdown blocks like ```json.
-Example:
-[
-  {
-    "doc_type": "Import",
-    "date": "14/07/2022",
-    "id": "NK00123",
-    "name": "Supplier Name",
-    "description": "Item Name",
-    "order_numbers": ["Code1", "Code2"],
-    "code": "Code",
-    "unit": "Unit",
-    "quantity": 10,
-    "unitprice": 500000,
-    "totalprice": 5000000
-  }
-]
 """
 
 def pdf_to_image_bytes(file_bytes):
@@ -123,25 +111,41 @@ def flatten_data(data):
         
         # Nếu order_numbers là mảng và có dữ liệu
         if isinstance(order_nums, list) and len(order_nums) > 0:
-            # Logic thông minh: Kiểm tra xem số lượng mã có khớp với số lượng hàng (Quantity) không
-            original_qty = 0
-            try:
-                original_qty = float(item.get('quantity', 0))
-            except:
-                pass
             
-            is_count_match = (original_qty == len(order_nums))
+            # Helper: Safely parse float
+            def get_val(key):
+                v = item.get(key)
+                try: 
+                    return float(v) if v is not None else None
+                except: 
+                    return None
+            
+            val_actual = get_val('quantity_actual')
+            val_doc = get_val('quantity_doc')
+            
+            # Logic thông minh: Kiểm tra số lượng dựa trên thực tế trước, sau đó mới đến chứng từ
+            # Trong phiếu xuất kho, "Thực xuất" (actual) quan trọng hơn.
+            target_qty = val_actual if val_actual is not None else val_doc
+            
+            count_codes = len(order_nums)
+            is_count_match = (target_qty == count_codes) if target_qty is not None else False
             
             # Tạo dòng mới cho từng mã
             for code in order_nums:
                 new_item = item.copy()
                 new_item['order_numbers'] = str(code) # Chuyển thành chuỗi để hiển thị
                 
-                # Nếu khớp số lượng (VD: 3 mã, SL=3) -> Mỗi dòng là 1 cái, Thành tiền = Đơn giá
+                # Nếu khớp số lượng (VD: 3 mã, SL Thực=3) -> Mỗi dòng là 1 cái
                 if is_count_match:
-                    new_item['quantity'] = 1
-                    if 'unitprice' in new_item:
-                        new_item['totalprice'] = new_item['unitprice']
+                    # Set value to 1 ONLY if the original value was not None
+                    if val_actual is not None:
+                        new_item['quantity_actual'] = 1
+                    if val_doc is not None:
+                        new_item['quantity_doc'] = 1
+                        
+                    # Recalculate Total Price -> Unit Price
+                    if new_item.get('unitprice'):
+                        new_item['totalprice'] = new_item.get('unitprice')
                 
                 flattened.append(new_item)
         else:

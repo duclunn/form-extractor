@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Download, FileText, Image as ImageIcon, AlertCircle, X, Loader, Plus, Trash2, Save, Settings, Key, BarChart3, PieChart, FolderInput, RotateCcw, Eye, Cpu, Server, WifiOff, ListPlus, Eraser } from 'lucide-react';
 
-// URL Ngrok của bạn - Đã cập nhật làm mặc định cho mọi người dùng
-const DEFAULT_LOCAL_URL = "[https://unoratorical-geophysical-jarrod.ngrok-free.dev/extract](https://unoratorical-geophysical-jarrod.ngrok-free.dev/extract)";
+// URL Ngrok của bạn
+const DEFAULT_LOCAL_URL = "https://unoratorical-geophysical-jarrod.ngrok-free.dev/extract";
 
 export default function App() {
   const [files, setFiles] = useState([]);
@@ -28,14 +28,11 @@ export default function App() {
   // Tải thư viện SheetJS
   useEffect(() => {
     const script = document.createElement('script');
-    script.src = "[https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js](https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js)";
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
     script.async = true;
     script.onload = () => setIsXLSXLoaded(true);
     document.body.appendChild(script);
 
-    // Logic ưu tiên: 
-    // 1. Nếu người dùng đã từng lưu URL khác trong LocalStorage, dùng cái đó (để bạn test localhost dễ dàng).
-    // 2. Nếu là người dùng mới tinh, dùng DEFAULT_LOCAL_URL (Ngrok).
     const savedUrl = localStorage.getItem('local_ocr_server_url');
     const urlToUse = savedUrl || DEFAULT_LOCAL_URL;
     
@@ -57,7 +54,6 @@ export default function App() {
 
   const checkServerHealth = async (url) => {
       try {
-          // Kiểm tra server bằng cách ping vào root /
           await fetch(url.replace('/extract', '/'), { method: 'GET' });
           setIsServerActive(true);
       } catch (e) {
@@ -65,9 +61,32 @@ export default function App() {
       }
   };
 
-  // Định nghĩa cột (Đã Việt hóa hoàn toàn label)
+  // --- HELPER: Number Formatting ---
+  // Format: 1000 -> "1.000" (Vietnamese style)
+  const formatNumber = (num) => {
+      if (num === null || num === undefined || num === '') return '';
+      // If it's already a string with dots/commas, return as is (trusting standardization)
+      if (typeof num === 'string' && (num.includes('.') || num.includes(','))) return num;
+      
+      const val = parseFloat(num);
+      if (isNaN(val)) return '';
+      return new Intl.NumberFormat('vi-VN').format(val);
+  };
+
+  // Parse: "1.000,5" -> 1000.5
+  const parseNumber = (str) => {
+      if (typeof str === 'number') return str;
+      if (!str) return 0;
+      // Remove thousands separator (.) and replace decimal separator (,) with (.)
+      const clean = str.toString().replace(/\./g, '').replace(/,/g, '.');
+      return parseFloat(clean) || 0;
+  };
+
+  // Định nghĩa cột
+  // Changed numeric columns to 'text' to allow formatted strings like "1.000"
+  // Added isNumeric flag for export logic
   const columns = [
-    { key: 'stt', label: 'STT', type: 'readonly', width: 'w-[50px] text-center' }, // Cột STT mới
+    { key: 'stt', label: 'STT', type: 'readonly', width: 'w-[50px] text-center' },
     { key: 'source_file', label: 'Tệp nguồn', type: 'readonly', width: 'min-w-[160px]' },
     { key: 'doc_type', label: 'Loại chứng từ', type: 'text', width: 'min-w-[100px]' },
     { key: 'date', label: 'Ngày', type: 'text', width: 'min-w-[110px]' },
@@ -77,23 +96,27 @@ export default function App() {
     { key: 'order_numbers', label: 'Mã Code', type: 'text', width: 'min-w-[150px]' },
     { key: 'code', label: 'Mã hàng', type: 'text', width: 'min-w-[120px]' },
     { key: 'unit', label: 'ĐVT', type: 'text', width: 'min-w-[80px]' },
-    { key: 'quantity', label: 'Số lượng', type: 'number', width: 'min-w-[90px]' },
-    { key: 'unitprice', label: 'Đơn giá', type: 'number', width: 'min-w-[130px]' },
-    { key: 'totalprice', label: 'Thành tiền', type: 'number', width: 'min-w-[140px]' }
+    // Numeric fields are now 'text' type in UI to support dots
+    { key: 'quantity_doc', label: 'SL CTừ', type: 'text', width: 'min-w-[90px]', isNumeric: true },
+    { key: 'quantity_actual', label: 'SL Thực', type: 'text', width: 'min-w-[90px]', isNumeric: true },
+    { key: 'unitprice', label: 'Đơn giá', type: 'text', width: 'min-w-[130px]', isNumeric: true },
+    { key: 'totalprice', label: 'Thành tiền', type: 'text', width: 'min-w-[140px]', isNumeric: true }
   ];
 
   const standardizeData = (rawData) => {
     return rawData.map(item => {
-        const parseNumber = (val) => {
-            if (!val) return 0;
+        // Standardize logic: Ensure we start with clean numbers, then format them to strings
+        const cleanVal = (val) => {
+            if (val === null || val === undefined || val === '') return '';
             if (typeof val === 'number') return val;
             let clean = val.toString().replace(/[^0-9.,]/g, '');
+            // Simple check to convert various formats to JS Float
             if ((clean.match(/\./g) || []).length > 1) {
-                clean = clean.replace(/\./g, '');
+                 clean = clean.replace(/\./g, '');
             } else if (clean.includes('.') && clean.includes(',')) {
-                clean = clean.replace(/\./g, '').replace(',', '.');
+                 clean = clean.replace(/\./g, '').replace(',', '.');
             } else if (clean.includes(',')) {
-                clean = clean.replace(',', '.');
+                 clean = clean.replace(',', '.');
             }
             return parseFloat(clean) || 0;
         };
@@ -106,9 +129,11 @@ export default function App() {
 
         return {
             ...item,
-            quantity: parseNumber(item.quantity),
-            unitprice: parseNumber(item.unitprice),
-            totalprice: parseNumber(item.totalprice),
+            // Convert to Formatted String (e.g. "1.000") for the UI state
+            quantity_doc: formatNumber(cleanVal(item.quantity_doc)),
+            quantity_actual: formatNumber(cleanVal(item.quantity_actual)),
+            unitprice: formatNumber(cleanVal(item.unitprice)),
+            totalprice: formatNumber(cleanVal(item.totalprice)),
             unit: formatUnit(item.unit)
         };
     });
@@ -174,7 +199,6 @@ export default function App() {
     setIsProcessing(true);
     setError('');
     
-    // Xóa dữ liệu nếu không ở chế độ nối tiếp
     if (!appendMode) {
         setExtractedData([]);
     }
@@ -205,35 +229,36 @@ export default function App() {
             const result = await response.json();
             const parsedData = result.data || result;
 
-            // Hàm xử lý làm phẳng (Flatten) dữ liệu dựa trên mã đơn hàng
+            // Flatten logic adapted for Formatted Strings
             const flattenAndInjectInfo = (data) => {
                 return data.flatMap(item => {
                     const orderNums = item.order_numbers;
                     
-                    // Nếu order_numbers là mảng và có nhiều hơn 0 phần tử
                     if (Array.isArray(orderNums) && orderNums.length > 0) {
                         
-                        // Kiểm tra xem số lượng mã có khớp với số lượng hàng hóa không (Smart Check)
-                        // Nếu Khớp: Chia đều số lượng là 1 cho mỗi dòng, Thành tiền = Đơn giá
-                        const isCountMatch = typeof item.quantity === 'number' && item.quantity === orderNums.length;
+                        // Parse back to number for logic check
+                        const valActual = item.quantity_actual === '' ? null : parseNumber(item.quantity_actual);
+                        const valDoc = item.quantity_doc === '' ? null : parseNumber(item.quantity_doc);
+                        const targetQty = valActual !== null ? valActual : valDoc;
+                        
+                        const isCountMatch = typeof targetQty === 'number' && targetQty === orderNums.length;
 
                         return orderNums.map(orderNum => ({
                             ...item,
                             source_file: file.name,
                             file_ref: file,
-                            order_numbers: orderNum, // Gán từng mã riêng lẻ
-                            // Nếu khớp số lượng, mỗi dòng là 1 cái. Nếu không, giữ nguyên (để người dùng tự sửa)
-                            quantity: isCountMatch ? 1 : item.quantity,
+                            order_numbers: orderNum, 
+                            // Set as String "1"
+                            quantity_doc: (isCountMatch && valDoc !== null) ? "1" : item.quantity_doc,
+                            quantity_actual: (isCountMatch && valActual !== null) ? "1" : item.quantity_actual,
                             totalprice: isCountMatch ? item.unitprice : item.totalprice
                         }));
                     }
                     
-                    // Trường hợp mặc định (không có mã đơn hoặc mảng rỗng)
                     return [{
                         ...item,
                         source_file: file.name,
                         file_ref: file,
-                        // Đảm bảo là chuỗi để hiển thị
                         order_numbers: Array.isArray(item.order_numbers) ? item.order_numbers.join(", ") : item.order_numbers
                     }];
                 });
@@ -285,17 +310,25 @@ export default function App() {
   const exportToExcel = () => {
     if (!window.XLSX) return;
     const wb = window.XLSX.utils.book_new();
-    const cleanData = extractedData.map(({ file_ref, ...rest }) => rest);
     
-    // Phân nhóm theo loại chứng từ
+    // Parse strings back to numbers for export
+    const cleanData = extractedData.map(({ file_ref, ...rest }) => {
+        return {
+            ...rest,
+            quantity_doc: parseNumber(rest.quantity_doc),
+            quantity_actual: parseNumber(rest.quantity_actual),
+            unitprice: parseNumber(rest.unitprice),
+            totalprice: parseNumber(rest.totalprice),
+        };
+    });
+    
     const groups = { 'Hoá đơn': [], 'Nhập kho': [], 'Xuất kho': [], 'Khác': [] };
     
     cleanData.forEach((item, index) => {
-        // Thêm STT vào dữ liệu xuất Excel
         const itemWithStt = { stt: index + 1, ...item };
-        if (item.doc_type === 'Hoá đơn') groups['Hoá đơn'].push(itemWithStt);
-        else if (item.doc_type === 'Phiếu nhập kho') groups['Phiếu nhập kho'].push(itemWithStt);
-        else if (item.doc_type === 'Phiếu xuất kho') groups['Phiếu xuất kho'].push(itemWithStt);
+        if (item.doc_type === 'Invoice') groups['Hoá đơn'].push(itemWithStt);
+        else if (item.doc_type === 'Import') groups['Nhập kho'].push(itemWithStt);
+        else if (item.doc_type === 'Export') groups['Xuất kho'].push(itemWithStt);
         else groups['Khác'].push(itemWithStt);
     });
 
@@ -303,7 +336,6 @@ export default function App() {
         if (data.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(data), name);
     });
 
-    // Thêm STT cho sheet tổng
     const allDataWithStt = cleanData.map((item, index) => ({ stt: index + 1, ...item }));
     if (wb.SheetNames.length === 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(allDataWithStt), 'Tất cả');
     window.XLSX.writeFile(wb, `ket-qua-trich-xuat.xlsx`);
@@ -311,8 +343,15 @@ export default function App() {
 
   const exportToCSV = () => {
     if (!window.XLSX) return;
-    // Thêm STT cho CSV
-    const cleanData = extractedData.map(({ file_ref, ...rest }, index) => ({ stt: index + 1, ...rest }));
+    const cleanData = extractedData.map(({ file_ref, ...rest }, index) => ({
+        stt: index + 1,
+        ...rest,
+        // For CSV, keep the numbers parsed too
+        quantity_doc: parseNumber(rest.quantity_doc),
+        quantity_actual: parseNumber(rest.quantity_actual),
+        unitprice: parseNumber(rest.unitprice),
+        totalprice: parseNumber(rest.totalprice),
+    }));
     const ws = window.XLSX.utils.json_to_sheet(cleanData);
     const csv = window.XLSX.utils.sheet_to_csv(ws);
     const link = document.createElement('a');
@@ -665,7 +704,7 @@ export default function App() {
                                                             type={col.type}
                                                             value={row[col.key] || ''}
                                                             onChange={(e) => updateRow(idx, col.key, e.target.value)}
-                                                            className="w-full px-2 py-1.5 text-sm border-transparent bg-transparent rounded focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 transition-all outline-none text-slate-700 min-w-full"
+                                                            className={`w-full px-2 py-1.5 text-sm border-transparent bg-transparent rounded focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 transition-all outline-none text-slate-700 min-w-full ${col.isNumeric ? 'text-right' : ''}`}
                                                             placeholder="..."
                                                         />
                                                     )}
