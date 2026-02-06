@@ -2,9 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Download, FileText, Image as ImageIcon, AlertCircle, X, Loader, Plus, Trash2, Save, Settings, Key, BarChart3, PieChart, FolderInput, RotateCcw, Eye, Cpu, Server, WifiOff, ListPlus, Eraser } from 'lucide-react';
 
 // URL Ngrok của bạn - Đã cập nhật làm mặc định cho mọi người dùng
-const DEFAULT_LOCAL_URL = "https://unoratorical-geophysical-jarrod.ngrok-free.dev/extract";
+const DEFAULT_LOCAL_URL = "[https://unoratorical-geophysical-jarrod.ngrok-free.dev/extract](https://unoratorical-geophysical-jarrod.ngrok-free.dev/extract)";
 
-export default function VietnameseFormExtractor() {
+export default function App() {
   const [files, setFiles] = useState([]);
   const [extractedData, setExtractedData] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -28,7 +28,7 @@ export default function VietnameseFormExtractor() {
   // Tải thư viện SheetJS
   useEffect(() => {
     const script = document.createElement('script');
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    script.src = "[https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js](https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js)";
     script.async = true;
     script.onload = () => setIsXLSXLoaded(true);
     document.body.appendChild(script);
