@@ -293,9 +293,9 @@ export default function App() {
     cleanData.forEach((item, index) => {
         // Thêm STT vào dữ liệu xuất Excel
         const itemWithStt = { stt: index + 1, ...item };
-        if (item.doc_type === 'Invoice') groups['Hoá đơn'].push(itemWithStt);
-        else if (item.doc_type === 'Import') groups['Nhập kho'].push(itemWithStt);
-        else if (item.doc_type === 'Export') groups['Xuất kho'].push(itemWithStt);
+        if (item.doc_type === 'Hoá đơn') groups['Hoá đơn'].push(itemWithStt);
+        else if (item.doc_type === 'Phiếu nhập kho') groups['Phiếu nhập kho'].push(itemWithStt);
+        else if (item.doc_type === 'Phiếu xuất kho') groups['Phiếu xuất kho'].push(itemWithStt);
         else groups['Khác'].push(itemWithStt);
     });
 
