@@ -46,6 +46,7 @@ You are an expert OCR engine. Analyze the image and extract data into JSON.
 - **date**: DD/MM/YYYY format.
 - **id**: Document Number (Số phiếu).
 - **name**: Deliverer/Supplier Name.
+- **code**: Product Code (Mã số).
 - **unit**: Unit (e.g., Cái, Kg).
 - **unitprice**: Number.
 - **totalprice**: Number.
@@ -84,6 +85,21 @@ You must separate the Item Description from the Serial/Order Numbers.
 
 ### OUTPUT FORMAT:
 Return ONLY a raw JSON Array. Do not include markdown blocks like ```json.
+[
+  {
+    "doc_type": "Import",
+    "date": "14/07/2022",
+    "id": "NK00123",
+    "name": "Supplier Name",
+    "description": "Item Name",
+    "order_numbers": ["Code1", "Code2"],
+    "code": "Code",
+    "unit": "Unit",
+    "quantity": 10,
+    "unitprice": 500000,
+    "totalprice": 5000000
+  }
+]
 """
 
 def pdf_to_image_bytes(file_bytes):
