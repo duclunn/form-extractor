@@ -92,7 +92,7 @@ def pdf_to_image_bytes(file_bytes):
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         if doc.page_count > 0:
             page = doc.load_page(0) # Lấy trang đầu tiên
-            pix = page.get_pixmap(dpi=200) # DPI 200 là đủ nét
+            pix = page.get_pixmap(dpi=300) # DPI 200 là đủ nét
             return pix.tobytes("png")
         else:
             raise Exception("PDF has no pages.")
