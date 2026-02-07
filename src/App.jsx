@@ -138,6 +138,15 @@ export default function App() {
             return s.charAt(0).toUpperCase() + s.slice(1);
         };
 
+        const translateDocType = (type) => {
+            if (!type) return '';
+            const t = type.toString().toLowerCase();
+            if (t.includes('export')) return 'Phiếu xuất kho';
+            if (t.includes('import')) return 'Phiếu nhập kho';
+            if (t.includes('invoice')) return 'Hoá đơn';
+            return type;
+        };
+
         // Standardize logic depends on mode
         if (extractionMode === 'material_list') {
              return {
@@ -150,6 +159,7 @@ export default function App() {
         } else {
              return {
                  ...item,
+                 doc_type: translateDocType(item.doc_type),
                  quantity_doc: formatNumber(cleanVal(item.quantity_doc)),
                  quantity_actual: formatNumber(cleanVal(item.quantity_actual)),
                  unitprice: formatNumber(cleanVal(item.unitprice)),
@@ -345,11 +355,11 @@ export default function App() {
     const dataWithStt = cleanData.map((item, index) => ({ stt: index + 1, ...item }));
     
     if (extractionMode === 'standard') {
-        const groups = { 'Hoá đơn': [], 'Nhập kho': [], 'Xuất kho': [], 'Khác': [] };
+        const groups = { 'Hoá đơn': [], 'Phiếu nhập kho': [], 'Phiếu xuất kho': [], 'Khác': [] };
         dataWithStt.forEach((item) => {
-            if (item.doc_type === 'Invoice') groups['Hoá đơn'].push(item);
-            else if (item.doc_type === 'Import') groups['Nhập kho'].push(item);
-            else if (item.doc_type === 'Export') groups['Xuất kho'].push(item);
+            if (item.doc_type === 'Hoá đơn') groups['Hoá đơn'].push(item);
+            else if (item.doc_type === 'Phiếu nhập kho') groups['Phiếu nhập kho'].push(item);
+            else if (item.doc_type === 'Phiếu xuất kho') groups['Phiếu xuất kho'].push(item);
             else groups['Khác'].push(item);
         });
         Object.entries(groups).forEach(([name, data]) => {
@@ -416,8 +426,8 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-50 p-4 lg:p-6 font-sans text-slate-900">
+      <div className="w-full mx-auto space-y-6">
         
         {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-xl shadow-sm border border-slate-200">
@@ -426,7 +436,7 @@ export default function App() {
               <FileText className="w-8 h-8" />
               Trích xuất Hóa đơn & Chứng từ
             </h1>
-            <p className="text-slate-500 mt-1">Hỗ trợ Hóa đơn, Phiếu Kho & Bảng kê vật tư (Local AI)</p>
+            <p className="text-slate-500 mt-1">Hỗ trợ Hóa đơn, Phiếu Kho & Bảng kê vật tư</p>
           </div>
           <div className="mt-4 md:mt-0 flex gap-3 items-center">
              
@@ -547,10 +557,10 @@ export default function App() {
         )}
 
         {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[350px_1fr] gap-6">
           
           {/* Left Column: Upload */}
-          <div className="lg:col-span-1 space-y-6">
+          <div className="space-y-6">
             
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <h3 className="font-semibold text-slate-800 mb-4">1. Tải lên tài liệu</h3>
@@ -664,7 +674,7 @@ export default function App() {
           </div>
 
           {/* Right Column: Result Table */}
-          <div className="lg:col-span-3">
+          <div className="min-w-0">
              <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col h-full min-h-[500px]">
                 
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-3 justify-between items-center bg-slate-50/50 rounded-t-xl">
@@ -685,7 +695,6 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* Table Area */}
                 <div className="flex-grow p-4 overflow-hidden flex flex-col">
                     {extractedData.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3 min-h-[300px]">
@@ -693,14 +702,13 @@ export default function App() {
                             <p>{isServerActive ? "Sẵn sàng trích xuất (Local)." : "Máy chủ Offline. Vui lòng chạy 'server.py'."}</p>
                         </div>
                     ) : (
-                        /* Added max-h-[70vh] to constrain height and force scrollbars to appear within view */
-                        <div className="border rounded-lg overflow-auto flex-grow bg-white shadow-sm max-h-[70vh]">
+                        <div className="border border-slate-200 rounded-lg overflow-auto flex-grow bg-white shadow-sm max-h-[75vh]">
                             <table className="min-w-max w-full divide-y divide-slate-200 text-sm relative">
                                 <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
-                                    <tr>
-                                        <th className="w-10 px-3 py-3 bg-slate-50"></th>
+                                    <tr className="divide-x divide-slate-200">
+                                        <th className="w-10 px-3 py-3 bg-slate-50 border-b border-slate-200"></th>
                                         {columns.map(col => (
-                                            <th key={col.key} className={`px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 ${col.width || ''}`}>
+                                            <th key={col.key} className={`px-3 py-3 text-center text-xs font-semibold text-slate-700 uppercase tracking-wider whitespace-nowrap bg-slate-50 border-b border-slate-200 ${col.width || ''}`}>
                                                 {col.label}
                                             </th>
                                         ))}
@@ -708,7 +716,7 @@ export default function App() {
                                 </thead>
                                 <tbody className="bg-white divide-y divide-slate-200">
                                     {extractedData.map((row, idx) => (
-                                        <tr key={idx} className="hover:bg-indigo-50/30 transition-colors group">
+                                        <tr key={idx} className="divide-x divide-slate-200 hover:bg-indigo-50/30 transition-colors group">
                                             <td className="px-2 py-2 text-center">
                                                 <button onClick={() => deleteRow(idx)} className="text-slate-300 hover:text-red-500 transition-colors">
                                                     <Trash2 className="w-4 h-4" />
