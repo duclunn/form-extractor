@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Download, FileText, Image as ImageIcon, AlertCircle, X, Loader, Plus, Trash2, Save, Settings, Key, BarChart3, PieChart, FolderInput, RotateCcw, Eye, Cpu, Server, WifiOff, ListPlus, Eraser } from 'lucide-react';
+import { Upload, Download, FileText, Image as ImageIcon, AlertCircle, X, Loader, Plus, Trash2, Save, Settings, Key, BarChart3, PieChart, FolderInput, RotateCcw, Eye, Cpu, Server, WifiOff, ListPlus, Eraser, Layers, ClipboardList } from 'lucide-react';
 
-// URL Ngrok của bạn
 const DEFAULT_LOCAL_URL = "https://unoratorical-geophysical-jarrod.ngrok-free.dev/extract";
 
 export default function App() {
@@ -14,18 +13,20 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
   
-  // Cấu hình
+  // Configuration
   const [serverUrl, setServerUrl] = useState(DEFAULT_LOCAL_URL);
   const [showSettings, setShowSettings] = useState(false);
   const [isServerActive, setIsServerActive] = useState(false);
   
-  // Chế độ kết quả: Nối tiếp (Append) hay Thay thế (Replace)
+  // Modes: 'standard' (Invoice/Import/Export) or 'material_list' (Bảng kê)
+  const [extractionMode, setExtractionMode] = useState('standard');
+  
+  // Result Mode: Append vs Replace
   const [appendMode, setAppendMode] = useState(true);
 
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
 
-  // Tải thư viện SheetJS
   useEffect(() => {
     const script = document.createElement('script');
     script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
@@ -62,55 +63,65 @@ export default function App() {
   };
 
   // --- HELPER: Number Formatting ---
-  // Format: 1000 -> "1.000" (Vietnamese style)
   const formatNumber = (num) => {
       if (num === null || num === undefined || num === '') return '';
-      // If it's already a string with dots/commas, return as is (trusting standardization)
       if (typeof num === 'string' && (num.includes('.') || num.includes(','))) return num;
-      
       const val = parseFloat(num);
       if (isNaN(val)) return '';
       return new Intl.NumberFormat('vi-VN').format(val);
   };
 
-  // Parse: "1.000,5" -> 1000.5
   const parseNumber = (str) => {
       if (typeof str === 'number') return str;
       if (!str) return 0;
-      // Remove thousands separator (.) and replace decimal separator (,) with (.)
       const clean = str.toString().replace(/\./g, '').replace(/,/g, '.');
       return parseFloat(clean) || 0;
   };
 
-  // Định nghĩa cột
-  // Changed numeric columns to 'text' to allow formatted strings like "1.000"
-  // Added isNumeric flag for export logic
-  const columns = [
-    { key: 'stt', label: 'STT', type: 'readonly', width: 'w-[50px] text-center' },
-    { key: 'source_file', label: 'Tệp nguồn', type: 'readonly', width: 'min-w-[160px]' },
-    { key: 'doc_type', label: 'Loại chứng từ', type: 'text', width: 'min-w-[100px]' },
-    { key: 'date', label: 'Ngày', type: 'text', width: 'min-w-[110px]' },
-    { key: 'id', label: 'Số phiếu', type: 'text', width: 'min-w-[120px]' },
-    { key: 'name', label: 'Người giao/Đơn vị', type: 'text', width: 'min-w-[200px]' },
-    { key: 'description', label: 'Tên', type: 'text', width: 'min-w-[350px]' },
-    { key: 'order_numbers', label: 'Mã Code', type: 'text', width: 'min-w-[150px]' },
-    { key: 'code', label: 'Mã hàng', type: 'text', width: 'min-w-[120px]' },
-    { key: 'unit', label: 'ĐVT', type: 'text', width: 'min-w-[80px]' },
-    // Numeric fields are now 'text' type in UI to support dots
-    { key: 'quantity_doc', label: 'SL CTừ', type: 'text', width: 'min-w-[90px]', isNumeric: true },
-    { key: 'quantity_actual', label: 'SL Thực', type: 'text', width: 'min-w-[90px]', isNumeric: true },
-    { key: 'unitprice', label: 'Đơn giá', type: 'text', width: 'min-w-[130px]', isNumeric: true },
-    { key: 'totalprice', label: 'Thành tiền', type: 'text', width: 'min-w-[140px]', isNumeric: true }
-  ];
+  // --- COLUMN DEFINITIONS ---
+  const getColumns = () => {
+      if (extractionMode === 'material_list') {
+          return [
+            { key: 'stt', label: 'STT', type: 'text', width: 'w-[50px] text-center' },
+            { key: 'category', label: 'Hạng mục', type: 'text', width: 'min-w-[150px] font-bold text-indigo-700 bg-indigo-50' },
+            { key: 'id', label: 'Số phiếu (Ord)', type: 'text', width: 'min-w-[100px]' },
+            { key: 'name', label: 'Tên vật tư', type: 'text', width: 'min-w-[250px]' },
+            { key: 'specs', label: 'Quy cách', type: 'text', width: 'min-w-[150px]' },
+            { key: 'unit', label: 'ĐVT', type: 'text', width: 'min-w-[80px]' },
+            { key: 'norm', label: 'Định mức', type: 'text', width: 'min-w-[90px]', isNumeric: true },
+            { key: 'actual', label: 'Thực lĩnh', type: 'text', width: 'min-w-[90px]', isNumeric: true },
+            { key: 'diff', label: 'Chênh lệch', type: 'text', width: 'min-w-[90px]', isNumeric: true },
+            { key: 'note', label: 'Ghi chú', type: 'text', width: 'min-w-[150px]' },
+            { key: 'source_file', label: 'Tệp nguồn', type: 'readonly', width: 'min-w-[160px]' }
+          ];
+      }
+      // Standard Mode
+      return [
+        { key: 'stt', label: 'STT', type: 'readonly', width: 'w-[50px] text-center' },
+        { key: 'source_file', label: 'Tệp nguồn', type: 'readonly', width: 'min-w-[160px]' },
+        { key: 'doc_type', label: 'Loại chứng từ', type: 'text', width: 'min-w-[100px]' },
+        { key: 'date', label: 'Ngày', type: 'text', width: 'min-w-[110px]' },
+        { key: 'id', label: 'Số phiếu', type: 'text', width: 'min-w-[120px]' },
+        { key: 'name', label: 'Người giao/Đơn vị', type: 'text', width: 'min-w-[200px]' },
+        { key: 'description', label: 'Tên', type: 'text', width: 'min-w-[350px]' },
+        { key: 'order_numbers', label: 'Mã Code', type: 'text', width: 'min-w-[150px]' },
+        { key: 'code', label: 'Mã hàng', type: 'text', width: 'min-w-[120px]' },
+        { key: 'unit', label: 'ĐVT', type: 'text', width: 'min-w-[80px]' },
+        { key: 'quantity_doc', label: 'SL CTừ', type: 'text', width: 'min-w-[90px]', isNumeric: true },
+        { key: 'quantity_actual', label: 'SL Thực', type: 'text', width: 'min-w-[90px]', isNumeric: true },
+        { key: 'unitprice', label: 'Đơn giá', type: 'text', width: 'min-w-[130px]', isNumeric: true },
+        { key: 'totalprice', label: 'Thành tiền', type: 'text', width: 'min-w-[140px]', isNumeric: true }
+      ];
+  };
+
+  const columns = getColumns();
 
   const standardizeData = (rawData) => {
     return rawData.map(item => {
-        // Standardize logic: Ensure we start with clean numbers, then format them to strings
         const cleanVal = (val) => {
             if (val === null || val === undefined || val === '') return '';
             if (typeof val === 'number') return val;
             let clean = val.toString().replace(/[^0-9.,]/g, '');
-            // Simple check to convert various formats to JS Float
             if ((clean.match(/\./g) || []).length > 1) {
                  clean = clean.replace(/\./g, '');
             } else if (clean.includes('.') && clean.includes(',')) {
@@ -127,15 +138,25 @@ export default function App() {
             return s.charAt(0).toUpperCase() + s.slice(1);
         };
 
-        return {
-            ...item,
-            // Convert to Formatted String (e.g. "1.000") for the UI state
-            quantity_doc: formatNumber(cleanVal(item.quantity_doc)),
-            quantity_actual: formatNumber(cleanVal(item.quantity_actual)),
-            unitprice: formatNumber(cleanVal(item.unitprice)),
-            totalprice: formatNumber(cleanVal(item.totalprice)),
-            unit: formatUnit(item.unit)
-        };
+        // Standardize logic depends on mode
+        if (extractionMode === 'material_list') {
+             return {
+                 ...item,
+                 norm: formatNumber(cleanVal(item.norm)),
+                 actual: formatNumber(cleanVal(item.actual)),
+                 diff: formatNumber(cleanVal(item.diff)),
+                 unit: formatUnit(item.unit)
+             }
+        } else {
+             return {
+                 ...item,
+                 quantity_doc: formatNumber(cleanVal(item.quantity_doc)),
+                 quantity_actual: formatNumber(cleanVal(item.quantity_actual)),
+                 unitprice: formatNumber(cleanVal(item.unitprice)),
+                 totalprice: formatNumber(cleanVal(item.totalprice)),
+                 unit: formatUnit(item.unit)
+             };
+        }
     });
   };
 
@@ -145,16 +166,11 @@ export default function App() {
       file.type === 'application/pdf' || file.type.startsWith('image/')
     );
     
-    if (validFiles.length === 0 && uploadedFiles.length > 0) {
-        setError('Không tìm thấy tệp hợp lệ. Chỉ chấp nhận PDF và Hình ảnh.');
-    } else if (validFiles.length !== uploadedFiles.length) {
-        setError('Một số tệp đã bị bỏ qua. Chỉ chấp nhận PDF và Hình ảnh.');
-    } else {
-        setError('');
-    }
-
     if (validFiles.length > 0) {
         setFiles(prev => [...prev, ...validFiles]);
+        setError('');
+    } else {
+        setError('Không tìm thấy tệp hợp lệ. Chỉ chấp nhận PDF và Hình ảnh.');
     }
   };
 
@@ -214,6 +230,8 @@ export default function App() {
         
         const formData = new FormData();
         formData.append('file', file);
+        // Pass the mode to backend
+        formData.append('mode', extractionMode);
 
         try {
             const response = await fetch(serverUrl, {
@@ -229,58 +247,59 @@ export default function App() {
             const result = await response.json();
             const parsedData = result.data || result;
 
-            // Flatten logic adapted for Formatted Strings
-            const flattenAndInjectInfo = (data) => {
-                return data.flatMap(item => {
-                    const orderNums = item.order_numbers;
-                    
-                    if (Array.isArray(orderNums) && orderNums.length > 0) {
-                        
-                        // Parse back to number for logic check
-                        const valActual = item.quantity_actual === '' ? null : parseNumber(item.quantity_actual);
-                        const valDoc = item.quantity_doc === '' ? null : parseNumber(item.quantity_doc);
-                        const targetQty = valActual !== null ? valActual : valDoc;
-                        
-                        const isCountMatch = typeof targetQty === 'number' && targetQty === orderNums.length;
+            // Logic to flatten is different for Material List (it's already flat from API)
+            // vs Standard (which has order_numbers split logic)
+            let processedItems = [];
+            
+            if (extractionMode === 'material_list') {
+                 // For Material List, just add file info
+                 const rawArray = Array.isArray(parsedData) ? parsedData : [parsedData];
+                 processedItems = rawArray.map(item => ({
+                     ...item,
+                     source_file: file.name,
+                     file_ref: file
+                 }));
+            } else {
+                 // Standard Mode Logic (flatten order numbers)
+                 const flattenAndInjectInfo = (data) => {
+                    return data.flatMap(item => {
+                        const orderNums = item.order_numbers;
+                        if (Array.isArray(orderNums) && orderNums.length > 0) {
+                            const valActual = item.quantity_actual === '' ? null : parseNumber(item.quantity_actual);
+                            const valDoc = item.quantity_doc === '' ? null : parseNumber(item.quantity_doc);
+                            const targetQty = valActual !== null ? valActual : valDoc;
+                            const isCountMatch = typeof targetQty === 'number' && targetQty === orderNums.length;
 
-                        return orderNums.map(orderNum => ({
+                            return orderNums.map(orderNum => ({
+                                ...item,
+                                source_file: file.name,
+                                file_ref: file,
+                                order_numbers: orderNum, 
+                                quantity_doc: (isCountMatch && valDoc !== null) ? "1" : item.quantity_doc,
+                                quantity_actual: (isCountMatch && valActual !== null) ? "1" : item.quantity_actual,
+                                totalprice: isCountMatch ? item.unitprice : item.totalprice
+                            }));
+                        }
+                        return [{
                             ...item,
                             source_file: file.name,
                             file_ref: file,
-                            order_numbers: orderNum, 
-                            // Set as String "1"
-                            quantity_doc: (isCountMatch && valDoc !== null) ? "1" : item.quantity_doc,
-                            quantity_actual: (isCountMatch && valActual !== null) ? "1" : item.quantity_actual,
-                            totalprice: isCountMatch ? item.unitprice : item.totalprice
-                        }));
-                    }
-                    
-                    return [{
-                        ...item,
-                        source_file: file.name,
-                        file_ref: file,
-                        order_numbers: Array.isArray(item.order_numbers) ? item.order_numbers.join(", ") : item.order_numbers
-                    }];
-                });
-            };
-
-            if (Array.isArray(parsedData)) {
-                const standardized = standardizeData(parsedData);
-                currentBatchData.push(...flattenAndInjectInfo(standardized));
-            } else {
-                const standardized = standardizeData([parsedData]);
-                currentBatchData.push(...flattenAndInjectInfo(standardized));
+                            order_numbers: Array.isArray(item.order_numbers) ? item.order_numbers.join(", ") : item.order_numbers
+                        }];
+                    });
+                };
+                
+                const rawArray = Array.isArray(parsedData) ? parsedData : [parsedData];
+                processedItems = flattenAndInjectInfo(rawArray);
             }
+
+            const standardized = standardizeData(processedItems);
+            currentBatchData.push(...standardized);
 
         } catch (e) {
             console.error("Xử lý thất bại cho tệp", file.name, e);
             hasErrorOccurred = true;
             setError(prev => prev + `\nLỗi khi xử lý ${file.name}: ${e.message}`);
-            
-            if (e.message.includes("Failed to fetch")) {
-                setError("Không thể kết nối đến Máy chủ Local. Bạn đã chạy 'server.py' chưa? Hãy kiểm tra trong Cài đặt.");
-                break; 
-            }
         }
       }
 
@@ -313,50 +332,52 @@ export default function App() {
     
     // Parse strings back to numbers for export
     const cleanData = extractedData.map(({ file_ref, ...rest }) => {
-        return {
-            ...rest,
-            quantity_doc: parseNumber(rest.quantity_doc),
-            quantity_actual: parseNumber(rest.quantity_actual),
-            unitprice: parseNumber(rest.unitprice),
-            totalprice: parseNumber(rest.totalprice),
-        };
+        const item = { ...rest };
+        columns.forEach(col => {
+            if (col.isNumeric) {
+                item[col.key] = parseNumber(item[col.key]);
+            }
+        });
+        return item;
     });
     
-    const groups = { 'Hoá đơn': [], 'Nhập kho': [], 'Xuất kho': [], 'Khác': [] };
+    // Add STT
+    const dataWithStt = cleanData.map((item, index) => ({ stt: index + 1, ...item }));
     
-    cleanData.forEach((item, index) => {
-        const itemWithStt = { stt: index + 1, ...item };
-        if (item.doc_type === 'Invoice') groups['Hoá đơn'].push(itemWithStt);
-        else if (item.doc_type === 'Import') groups['Nhập kho'].push(itemWithStt);
-        else if (item.doc_type === 'Export') groups['Xuất kho'].push(itemWithStt);
-        else groups['Khác'].push(itemWithStt);
-    });
+    if (extractionMode === 'standard') {
+        const groups = { 'Hoá đơn': [], 'Nhập kho': [], 'Xuất kho': [], 'Khác': [] };
+        dataWithStt.forEach((item) => {
+            if (item.doc_type === 'Invoice') groups['Hoá đơn'].push(item);
+            else if (item.doc_type === 'Import') groups['Nhập kho'].push(item);
+            else if (item.doc_type === 'Export') groups['Xuất kho'].push(item);
+            else groups['Khác'].push(item);
+        });
+        Object.entries(groups).forEach(([name, data]) => {
+            if (data.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(data), name);
+        });
+    } else {
+        // Material List usually one big sheet, or split by ID. Let's do one sheet.
+        window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(dataWithStt), 'Bảng kê vật tư');
+    }
 
-    Object.entries(groups).forEach(([name, data]) => {
-        if (data.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(data), name);
-    });
-
-    const allDataWithStt = cleanData.map((item, index) => ({ stt: index + 1, ...item }));
-    if (wb.SheetNames.length === 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(allDataWithStt), 'Tất cả');
-    window.XLSX.writeFile(wb, `ket-qua-trich-xuat.xlsx`);
+    if (wb.SheetNames.length === 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(dataWithStt), 'Tất cả');
+    window.XLSX.writeFile(wb, `ket-qua-${extractionMode}.xlsx`);
   };
 
   const exportToCSV = () => {
     if (!window.XLSX) return;
-    const cleanData = extractedData.map(({ file_ref, ...rest }, index) => ({
-        stt: index + 1,
-        ...rest,
-        // For CSV, keep the numbers parsed too
-        quantity_doc: parseNumber(rest.quantity_doc),
-        quantity_actual: parseNumber(rest.quantity_actual),
-        unitprice: parseNumber(rest.unitprice),
-        totalprice: parseNumber(rest.totalprice),
-    }));
+    const cleanData = extractedData.map(({ file_ref, ...rest }, index) => {
+        const item = { stt: index + 1, ...rest };
+        columns.forEach(col => {
+            if (col.isNumeric) item[col.key] = parseNumber(item[col.key]);
+        });
+        return item;
+    });
     const ws = window.XLSX.utils.json_to_sheet(cleanData);
     const csv = window.XLSX.utils.sheet_to_csv(ws);
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }));
-    link.download = `ket-qua-trich-xuat.csv`;
+    link.download = `ket-qua-${extractionMode}.csv`;
     link.click();
   };
 
@@ -405,14 +426,14 @@ export default function App() {
               <FileText className="w-8 h-8" />
               Trích xuất Hóa đơn & Chứng từ
             </h1>
-            <p className="text-slate-500 mt-1">Xử lý tự động Hoá đơn, Phiếu nhập/xuất kho (Local AI)</p>
+            <p className="text-slate-500 mt-1">Hỗ trợ Hóa đơn, Phiếu Kho & Bảng kê vật tư (Local AI)</p>
           </div>
           <div className="mt-4 md:mt-0 flex gap-3 items-center">
              
-             {/* Trạng thái Server */}
+             {/* Status Badge */}
              <div className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium shadow-sm ${isServerActive ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`} title={isServerActive ? "Đã kết nối máy chủ" : "Mất kết nối máy chủ"}>
                 <div className={`w-2.5 h-2.5 rounded-full ${isServerActive ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                <span>{isServerActive ? "Máy chủ Online" : "Máy chủ Offline"}</span>
+                <span>{isServerActive ? "Server Online" : "Server Offline"}</span>
              </div>
 
              <button 
@@ -430,7 +451,70 @@ export default function App() {
           </div>
         </div>
 
-        {/* Xem trước tệp */}
+        {/* --- MODE SWITCHER & SETTINGS --- */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            
+            {/* Mode Switcher */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+                        {extractionMode === 'standard' ? <Layers className="w-6 h-6"/> : <ClipboardList className="w-6 h-6"/>}
+                    </div>
+                    <div>
+                        <h3 className="font-semibold text-slate-800">Chế độ Trích xuất</h3>
+                        <p className="text-xs text-slate-500">
+                            {extractionMode === 'standard' ? "Dành cho Hóa đơn GTGT, Phiếu Nhập/Xuất" : "Dành cho Bảng kê vật tư nhiều trang"}
+                        </p>
+                    </div>
+                </div>
+                
+                <div className="flex bg-slate-100 p-1 rounded-lg">
+                    <button 
+                        onClick={() => { setExtractionMode('standard'); setExtractedData([]); }}
+                        className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${extractionMode === 'standard' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        Hóa đơn / Chứng từ
+                    </button>
+                    <button 
+                        onClick={() => { setExtractionMode('material_list'); setExtractedData([]); }}
+                        className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${extractionMode === 'material_list' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        Bảng kê vật tư
+                    </button>
+                </div>
+            </div>
+
+            {/* Config Panel (Hidden by default) */}
+            {showSettings && (
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 animate-in fade-in">
+                <div className="flex justify-between items-center mb-2">
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm">
+                    <Server className="w-4 h-4 text-indigo-500" /> Cấu hình Server
+                    </h3>
+                    <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
+                    <X className="w-4 h-4" />
+                    </button>
+                </div>
+                <div className="flex gap-2">
+                    <input 
+                        type="text"
+                        value={serverUrl}
+                        onChange={(e) => saveServerUrl(e.target.value)}
+                        placeholder="URL Server..."
+                        className="flex-1 px-3 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                    <button
+                        onClick={() => checkServerHealth(serverUrl)}
+                        className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded text-sm font-medium hover:bg-indigo-100"
+                    >
+                        Check
+                    </button>
+                </div>
+            </div>
+            )}
+        </div>
+
+        {/* File Preview */}
         {previewFile && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 p-4 sm:p-8 animate-in fade-in" onClick={() => setPreviewFile(null)}>
                 <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden relative" onClick={e => e.stopPropagation()}>
@@ -462,50 +546,12 @@ export default function App() {
             </div>
         )}
 
-        {/* Bảng Cài đặt */}
-        {showSettings && (
-          <div className="bg-white p-6 rounded-xl shadow-lg border border-indigo-100 animate-in fade-in slide-in-from-top-4">
-             <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                   <Server className="w-5 h-5 text-indigo-500" /> Cấu hình Máy chủ Local
-                </h3>
-                <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
-                   <X className="w-5 h-5" />
-                </button>
-             </div>
-             
-             {/* Server URL Input */}
-             <div className="space-y-3 mb-6">
-                <label className="block text-sm font-medium text-slate-700">Đường dẫn Server Python</label>
-                <div className="flex gap-2">
-                   <input 
-                      type="text"
-                      value={serverUrl}
-                      onChange={(e) => saveServerUrl(e.target.value)}
-                      placeholder="http://localhost:8000/extract"
-                      className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                   />
-                   <button
-                      onClick={() => checkServerHealth(serverUrl)}
-                      className="px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100 flex items-center gap-2"
-                   >
-                      <RotateCcw className="w-3 h-3" /> Kiểm tra
-                   </button>
-                </div>
-                <p className="text-xs text-slate-500">
-                   Yêu cầu máy chủ Python (server.py) đang chạy song song.
-                </p>
-             </div>
-          </div>
-        )}
-
-        {/* Nội dung chính */}
+        {/* Main Content */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           
-          {/* Cột trái: Upload & Nút bấm */}
+          {/* Left Column: Upload */}
           <div className="lg:col-span-1 space-y-6">
             
-            {/* Upload Box */}
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <h3 className="font-semibold text-slate-800 mb-4">1. Tải lên tài liệu</h3>
                 <div 
@@ -545,25 +591,9 @@ export default function App() {
                     <span className="text-xs text-slate-400 mt-4 text-center">Kéo & Thả tệp hoặc thư mục vào đây</span>
                 </div>
                 
-                {/* Inputs */}
-                <input 
-                    ref={fileInputRef}
-                    type="file" 
-                    className="hidden" 
-                    accept=".pdf,image/*" 
-                    multiple 
-                    onChange={handleFileUpload} 
-                />
-                <input 
-                    ref={folderInputRef}
-                    type="file" 
-                    className="hidden"
-                    {...{ webkitdirectory: "", directory: "" }} 
-                    multiple
-                    onChange={handleFileUpload}
-                />
+                <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,image/*" multiple onChange={handleFileUpload} />
+                <input ref={folderInputRef} type="file" className="hidden" {...{ webkitdirectory: "", directory: "" }} multiple onChange={handleFileUpload} />
 
-                {/* Danh sách file */}
                 {files.length > 0 && (
                     <div className="mt-4 space-y-2 max-h-60 overflow-y-auto">
                         {files.map((file, idx) => (
@@ -589,11 +619,10 @@ export default function App() {
                 )}
             </div>
 
-            {/* Chế độ kết quả */}
             <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
                 <span className="text-sm font-medium text-slate-700 flex items-center gap-2">
                     {appendMode ? <ListPlus className="w-4 h-4 text-blue-500" /> : <Eraser className="w-4 h-4 text-orange-500" />}
-                    Chế độ:
+                    Ghi dữ liệu:
                 </span>
                 <div className="flex bg-slate-100 p-1 rounded-lg">
                     <button 
@@ -611,7 +640,6 @@ export default function App() {
                 </div>
             </div>
 
-            {/* Nút Bắt đầu */}
             <button
                 onClick={processFiles}
                 disabled={isProcessing || files.length === 0}
@@ -635,11 +663,10 @@ export default function App() {
 
           </div>
 
-          {/* Cột phải: Bảng kết quả */}
+          {/* Right Column: Result Table */}
           <div className="lg:col-span-3">
              <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col h-full min-h-[500px]">
                 
-                {/* Table Header Controls */}
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-3 justify-between items-center bg-slate-50/50 rounded-t-xl">
                     <div className="flex items-center gap-2">
                         <span className="font-semibold text-slate-700">Bảng kết quả</span>
@@ -666,11 +693,12 @@ export default function App() {
                             <p>{isServerActive ? "Sẵn sàng trích xuất (Local)." : "Máy chủ Offline. Vui lòng chạy 'server.py'."}</p>
                         </div>
                     ) : (
-                        <div className="border rounded-lg overflow-auto flex-grow bg-white shadow-sm">
-                            <table className="min-w-max w-full divide-y divide-slate-200 text-sm">
-                                <thead className="bg-slate-50 sticky top-0 z-10">
+                        /* Added max-h-[70vh] to constrain height and force scrollbars to appear within view */
+                        <div className="border rounded-lg overflow-auto flex-grow bg-white shadow-sm max-h-[70vh]">
+                            <table className="min-w-max w-full divide-y divide-slate-200 text-sm relative">
+                                <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                                     <tr>
-                                        <th className="w-10 px-3 py-3"></th>
+                                        <th className="w-10 px-3 py-3 bg-slate-50"></th>
                                         {columns.map(col => (
                                             <th key={col.key} className={`px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 ${col.width || ''}`}>
                                                 {col.label}
