@@ -15,6 +15,11 @@ export default function App() {
   const [previewFile, setPreviewFile] = useState(null);
   const [compareItem, setCompareItem] = useState(null); // Side-by-side Modal State
   
+  // Resizing state for Compare Modal - Default to 1:2 ratio (33.33%)
+  const [splitPercentage, setSplitPercentage] = useState(33.33);
+  const [isResizing, setIsResizing] = useState(false);
+  const compareContainerRef = useRef(null);
+
   const [serverUrl, setServerUrl] = useState(DEFAULT_LOCAL_URL);
   const [showSettings, setShowSettings] = useState(false);
   const [isServerActive, setIsServerActive] = useState(false);
@@ -60,6 +65,39 @@ export default function App() {
       }
   };
 
+  // Resizing logic effect
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+        if (!isResizing || !compareContainerRef.current) return;
+        const containerRect = compareContainerRef.current.getBoundingClientRect();
+        // Calculate new percentage based on mouse position relative to container
+        const newPercentage = ((e.clientX - containerRect.left) / containerRect.width) * 100;
+        // Keep the drag bounds between 20% and 80% to avoid crushing either pane
+        if (newPercentage >= 20 && newPercentage <= 80) { 
+            setSplitPercentage(newPercentage);
+        }
+    };
+
+    const handleMouseUp = () => {
+        if (isResizing) setIsResizing(false);
+    };
+
+    if (isResizing) {
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
+  const startResizing = (e) => {
+      e.preventDefault(); // Prevent text selection while dragging
+      setIsResizing(true);
+  };
+
   const formatNumber = (num) => {
       if (num === null || num === undefined || num === '') return '';
       if (typeof num === 'string' && (num.includes('.') || num.includes(','))) return num;
@@ -75,6 +113,7 @@ export default function App() {
       return parseFloat(clean) || 0;
   };
 
+  // Standard Mode Column Definition
   const columns = [
     { key: 'stt', label: 'STT', type: 'readonly', width: 'w-[50px] text-center' },
     { key: 'source_file', label: 'Tệp nguồn', type: 'readonly', width: 'min-w-[160px]' },
@@ -91,6 +130,18 @@ export default function App() {
     { key: 'unitprice', label: 'Đơn giá', type: 'text', width: 'min-w-[130px]', isNumeric: true },
     { key: 'totalprice', label: 'Thành tiền', type: 'text', width: 'min-w-[140px]', isNumeric: true }
   ];
+
+  // Specific widths for the Compare Modal columns (Percentage based to fit exactly in container)
+  const compareColumnWidths = {
+    'STT': 'w-[5%]',
+    'Tên vật tư': 'w-[25%]',
+    'Quy cách': 'w-[15%]',
+    'ĐVT': 'w-[7%]',
+    'Định mức': 'w-[10%]',
+    'Thực lĩnh': 'w-[10%]',
+    'Chênh lệch': 'w-[10%]',
+    'Ghi chú': 'w-[18%]'
+  };
 
   const standardizeData = (rawData) => {
     return rawData.map(item => {
@@ -276,7 +327,7 @@ export default function App() {
         if (data.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(data), name);
     });
     if (wb.SheetNames.length === 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(dataWithStt), 'Tất cả');
-    window.XLSX.writeFile(wb, `ket-qua-trich-xuat.xlsx`);
+    window.XLSX.writeFile(wb, `trich-xuat-hoa-don-chung-tu.xlsx`);
   };
 
   // MATERIAL EXPORT
@@ -285,7 +336,7 @@ export default function App() {
     const wb = window.XLSX.utils.book_new();
     const ws = window.XLSX.utils.json_to_sheet(item.data);
     window.XLSX.utils.book_append_sheet(wb, ws, 'Bảng kê vật tư');
-    window.XLSX.writeFile(wb, `${item.fileName.replace(/\.[^/.]+$/, "")}_clean.xlsx`);
+    window.XLSX.writeFile(wb, `${item.fileName.replace(/\.[^/.]+$/, "")}.xlsx`);
   };
 
   const exportToCSV = () => {
@@ -306,12 +357,39 @@ export default function App() {
   const updateRow = (index, field, value) => setExtractedData(prev => {
       const newData = [...prev]; newData[index] = { ...newData[index], [field]: value }; return newData;
   });
+
+  // Handle Editing inside the Compare Modal
+  const handleCompareItemChange = (rowIndex, key, newValue) => {
+      if (!compareItem) return;
+      
+      const updatedData = [...compareItem.data];
+      updatedData[rowIndex] = { ...updatedData[rowIndex], [key]: newValue };
+      
+      const updatedCompareItem = { ...compareItem, data: updatedData };
+      
+      setCompareItem(updatedCompareItem);
+      
+      setMaterialHistory(prevHistory => 
+          prevHistory.map(item => 
+              item.id === compareItem.id ? updatedCompareItem : item
+          )
+      );
+  };
+
   const deleteRow = (index) => setExtractedData(prev => prev.filter((_, i) => i !== index));
   const addRow = () => setExtractedData(prev => [...prev, columns.reduce((acc, col) => ({ ...acc, [col.key]: '' }), {})]);
   const clearAll = () => {
     if(window.confirm("Bạn có chắc muốn xóa toàn bộ dữ liệu?")) {
         setFiles([]); setExtractedData([]); setMaterialHistory([]); setError(''); setStatusMessage('');
     }
+  };
+
+  const removeFile = (index) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handlePreviewFile = (file) => {
+    if (file) setPreviewFile(file);
   };
 
   return (
@@ -353,7 +431,7 @@ export default function App() {
                     <div>
                         <h3 className="font-semibold text-slate-800">Chế độ Trích xuất</h3>
                         <p className="text-xs text-slate-500">
-                            {extractionMode === 'standard' ? "Hóa đơn, Phiếu Nhập/Xuất kho" : "Bảng kê vật tư PDF nhiều trang"}
+                            {extractionMode === 'standard' ? "Hóa đơn, Phiếu Nhập/Xuất kho" : "Bảng kê vật tư"}
                         </p>
                     </div>
                 </div>
@@ -392,29 +470,59 @@ export default function App() {
                         </div>
                         <button onClick={() => setCompareItem(null)} className="p-2 hover:bg-slate-200 rounded-full"><X className="w-6 h-6" /></button>
                     </div>
-                    <div className="flex-grow flex flex-col md:flex-row overflow-hidden">
+                    
+                    {/* Resizable Container */}
+                    <div className="flex-grow flex flex-col md:flex-row overflow-hidden relative" ref={compareContainerRef}>
+                        
                         {/* Cột trái - File Đầu vào */}
-                        <div className="w-full md:w-1/2 border-r border-slate-200 bg-slate-100 p-2 overflow-hidden flex flex-col">
+                        <div 
+                            className="w-full md:w-auto h-1/2 md:h-full border-b md:border-b-0 md:border-r border-slate-200 bg-slate-100 p-2 flex flex-col relative shrink-0 transition-[flex-basis] duration-75 ease-linear"
+                            style={{ flexBasis: `${splitPercentage}%` }}
+                        >
                            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 text-center">Tệp gốc</span>
                            <iframe src={URL.createObjectURL(compareItem.file)} className="w-full flex-grow rounded border border-slate-300 shadow-inner" title="PDF Preview" />
+                           {/* Invisible overlay while dragging to prevent iframe from intercepting mouse events */}
+                           {isResizing && <div className="absolute inset-0 z-10 cursor-col-resize" />} 
                         </div>
+
+                        {/* Dragger / Resizer (Visible only on desktop md+) */}
+                        <div 
+                            className="hidden md:flex w-2 cursor-col-resize bg-slate-200 hover:bg-indigo-400 shrink-0 items-center justify-center transition-colors z-20"
+                            onMouseDown={startResizing}
+                        >
+                            <div className="w-0.5 h-8 bg-slate-400 rounded-full" />
+                        </div>
+
                         {/* Cột phải - Bảng Dữ liệu */}
-                        <div className="w-full md:w-1/2 p-2 overflow-auto bg-white flex flex-col">
-                           <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 text-center">Dữ liệu trích xuất</span>
+                        <div className="flex-1 p-2 overflow-auto bg-white flex flex-col min-w-0">
+                           <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 text-center">Dữ liệu trích xuất (CÓ THỂ CHỈNH SỬA)</span>
                            <div className="border border-slate-200 rounded overflow-auto flex-grow relative shadow-sm">
-                               <table className="min-w-max w-full divide-y divide-slate-200 text-sm">
+                               <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
                                    <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                                        <tr className="divide-x divide-slate-200">
                                             {compareItem.data.length > 0 && Object.keys(compareItem.data[0]).map(key => (
-                                                <th key={key} className="px-3 py-3 text-center text-xs font-semibold text-slate-700 uppercase">{key}</th>
+                                                <th 
+                                                    key={key} 
+                                                    className={`px-1 py-3 text-center text-[10px] sm:text-xs font-semibold text-slate-700 uppercase overflow-hidden ${compareColumnWidths[key] || 'w-[10%]'}`}
+                                                >
+                                                    {key}
+                                                </th>
                                             ))}
                                        </tr>
                                    </thead>
                                    <tbody className="divide-y divide-x divide-slate-200">
                                        {compareItem.data.map((row, i) => (
                                            <tr key={i} className="divide-x divide-slate-200 hover:bg-indigo-50/30">
-                                                {Object.values(row).map((val, j) => (
-                                                    <td key={j} className="px-3 py-2 text-center">{val}</td>
+                                                {Object.keys(compareItem.data[0]).map(key => (
+                                                    <td key={key} className="px-0 py-1 overflow-hidden">
+                                                        <input 
+                                                            type="text"
+                                                            value={row[key] || ''}
+                                                            onChange={(e) => handleCompareItemChange(i, key, e.target.value)}
+                                                            className="w-full px-1 py-1 text-xs sm:text-sm border-transparent bg-transparent rounded focus:bg-white focus:border-indigo-300 outline-none text-slate-700 text-center truncate"
+                                                            title={row[key] || ''}
+                                                        />
+                                                    </td>
                                                 ))}
                                            </tr>
                                        ))}
@@ -580,7 +688,7 @@ export default function App() {
                     <>
                         <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-xl">
                             <div className="flex items-center gap-2">
-                                <span className="font-semibold text-slate-700">Lịch sử trích xuất Bảng Kê</span>
+                                <span className="font-semibold text-slate-700">Lịch sử trích xuất Bảng kê vật tư</span>
                                 <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-1 rounded-full">{materialHistory.length} tệp</span>
                             </div>
                         </div>
@@ -589,7 +697,7 @@ export default function App() {
                             {materialHistory.length === 0 ? (
                                 <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3 min-h-[300px]">
                                     <ClipboardList className="w-10 h-10 text-slate-300" />
-                                    <p>Sẵn sàng trích xuất Bảng kê vật tư (Multi-page PDF)</p>
+                                    <p>Sẵn sàng trích xuất Bảng kê vật tư</p>
                                 </div>
                             ) : (
                                 <div className="border border-slate-200 rounded-lg overflow-auto shadow-sm max-h-[75vh]">
@@ -598,7 +706,7 @@ export default function App() {
                                             <tr>
                                                 <th className="px-4 py-3 text-left font-semibold text-slate-700 uppercase tracking-wider text-xs">Tệp đầu vào (PDF)</th>
                                                 <th className="px-4 py-3 text-center font-semibold text-slate-700 uppercase tracking-wider text-xs w-32">So sánh</th>
-                                                <th className="px-4 py-3 text-center font-semibold text-slate-700 uppercase tracking-wider text-xs w-40">Xuất Excel</th>
+                                                <th className="px-4 py-3 text-center font-semibold text-slate-700 uppercase tracking-wider text-xs w-40">Tải về</th>
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-slate-200">
@@ -613,7 +721,7 @@ export default function App() {
                                                             onClick={() => setCompareItem(item)} 
                                                             className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg font-medium hover:bg-indigo-100 flex items-center justify-center gap-1 mx-auto transition shadow-sm border border-indigo-100"
                                                         >
-                                                            <Columns className="w-4 h-4" /> Compare
+                                                            <Columns className="w-4 h-4" /> So sánh
                                                         </button>
                                                     </td>
                                                     <td className="px-4 py-4 text-center">
