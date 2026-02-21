@@ -1,14 +1,13 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import base64
 import json
 import requests
-import re
-from PIL import Image
 import io
 import fitz  # PyMuPDF: Dùng để xử lý PDF
 import os
+from PIL import Image
 from dotenv import load_dotenv
 
 # Initialize FastAPI
@@ -26,19 +25,18 @@ app.add_middleware(
 )
 
 # --- CONFIGURATION ---
-# API Key của bạn (Lấy từ biến môi trường hoặc file .env)
 API_KEY = os.getenv("API_KEY")
-# Fallback logic if needed, though strictly it should be in env
 if not API_KEY:
     print("WARNING: API_KEY not found in environment variables.")
 
-MODEL_NAME = "gemini-2.5-flash-lite"
-# Ensure the model version exists, or fallback to stable flash if needed
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
-print(f"Targeting Gemini URL: {GEMINI_URL}")
+# Define endpoints for different models
+GEMINI_URL_FLASH = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={API_KEY}"
+GEMINI_URL_PRO = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={API_KEY}"
 
-# PROMPT (Updated: Strict Column Mapping)
-SYSTEM_PROMPT = """
+# --- PROMPTS ---
+
+# 1. STANDARD PROMPT (Hóa đơn / Phiếu kho - Dùng Flash Lite)
+STANDARD_PROMPT = """
 You are an expert OCR engine. Analyze the image and extract data into JSON.
 
 ### 1. EXTRACTION RULES
@@ -102,15 +100,59 @@ Return ONLY a raw JSON Array. Do not include markdown blocks like ```json.
 ]
 """
 
+# 2. MATERIAL LIST PROMPT (Bảng kê vật tư - Dùng Pro)
+MATERIAL_LIST_PROMPT = """
+You are a data conversion engine. Convert this Bill of Materials PDF into a clean CSV.
+        
+        CRITICAL DATA EXTRACTION RULES:
+        1.  **Columns:** STT | Tên vật tư | Quy cách | ĐVT | Định mức | Thực lĩnh | Chênh lệch | Ghi chú
+        
+        2.  **Fix "STT" (Sequence):** Capture "A", "B", "C" for headers and "1", "2", "3" for items.
+            - **CRITICAL:** Preserve rows that have an STT number but are otherwise empty. 
+            - Example: If the PDF shows a row number "20" with no other text, output: `20|||||||`
+            
+        3.  **Fix "Định mức" (Rated) & "Thực lĩnh" (Actual) - STRICT RULE:** - In the PDF, usually two numbers are stacked in the quantity area.
+            - **Case A (Two Numbers Found):** The FIRST/TOP number is "Định mức". The SECOND/BOTTOM number is "Thực lĩnh". (They may be different values).
+            - **Case B (One Number Found):** If only one number is visible, it is "Định mức". Leave "Thực lĩnh" EMPTY.
+            - **Case C (Empty):** If no numbers are found, leave both empty.
+            - **Math Addition:** If workers wrote an addition formula like "1+1" or "2 + 1" (e.g., Định mức is 1, Thực lĩnh is 1+1), calculate the total and output ONLY the final sum (e.g., "2").
+            
+            - **Cleanup:** Convert all commas to dots (e.g., "20,5" -> "20.5"). Remove symbols like "v", "V", or "/" attached to numbers (e.g., "1v" -> "1").
+        
+        4.  **Fix "Quy cách" (Specification):** Combine stacked text into one line (e.g., "45 0.27").
+        
+        5.  **Output Format:** - Pipe separated (|). 
+            - No markdown. 
+            - First line MUST be the header.
+
+        6.  **Handwriting Quirks (BE CAREFUL):**
+            - Workers have messy handwriting. Pay close attention to stroke patterns.
+            - "1" is often written with a heavy top hook, making it look like "4" or "7".
+            - **Row Line Interference (CRITICAL):** If a "1" is written too low, the printed horizontal line separating the rows might cross through it. This visual overlap makes the "1" look exactly like a "4". If the horizontal bar of a suspected "4" perfectly aligns with the table's row border, it is actually a "1".
+            - "6" is sometimes closed tightly, making it look like "0".
+            - **Logical check:** "Thực lĩnh" is usually equal to or very close to "Định mức". If "Định mức" is 10, and the handwritten "Thực lĩnh" looks like "40" or "70", it is almost certainly "10". Use common sense based on the row context.
+
+        Example Output:
+        STT|Tên vật tư|Quy cách|ĐVT|Định mức|Thực lĩnh|Chênh lệch|Ghi chú
+        A|TÔN SILIC||||||
+        1|Tôn TU|45 x 0.27|Kg|20.5|20.5||
+        2|Tôn TI|45 0.27|Kg|5.1|5.4||
+        3|Dây Teflon|2.5mm2|m|10|14||
+        4|Dây Khác|Type C|m|5|||
+        5|||||||
+        6|||||||
+        7|Vật tư cộng thêm|Loại 1|cái|1|2||
+"""
+
 def pdf_to_images(file_bytes):
-    """Chuyển tất cả các trang của PDF thành danh sách bytes ảnh PNG"""
+    """Chuyển PDF thành hình ảnh (Chỉ dùng cho Standard Mode)"""
     images = []
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         if doc.page_count > 0:
             for page in doc:
-                pix = page.get_pixmap(dpi=300) # DPI 300 là đủ nét
-                images.append(pix.tobytes("png"))
+                pix = page.get_pixmap(dpi=300) 
+                images.append(pix.tobytes("jpeg"))
             return images
         else:
             raise Exception("PDF has no pages.")
@@ -118,19 +160,55 @@ def pdf_to_images(file_bytes):
         print(f"PDF Conversion Error: {e}")
         raise
 
+def parse_material_csv(raw_text):
+    """Hàm thay thế Pandas để parse kết quả từ Gemini Pro CSV sang dạng Array Object JSON"""
+    clean_text = raw_text.replace("```csv", "").replace("```", "").strip()
+    clean_lines = []
+    for line in clean_text.split('\n'):
+        line = line.strip()
+        if line.count('|') >= 7 and "---" not in line:
+            clean_lines.append(line)
+            
+    if not clean_lines:
+        return []
+
+    headers = [h.strip() for h in clean_lines[0].split('|')]
+    
+    def evaluate_math(val_str):
+        val_str = str(val_str).strip().replace('v', '').replace('V', '').replace('✓', '').replace('/', '')
+        if '+' in val_str:
+            try:
+                total = sum(float(i.strip()) for i in val_str.split('+') if i.strip())
+                return int(total) if total.is_integer() else total
+            except Exception:
+                return val_str
+        return val_str
+
+    data = []
+    for line in clean_lines[1:]:
+        parts = [p.strip() for p in line.split('|')]
+        # Pad parts just in case
+        while len(parts) < len(headers):
+            parts.append("")
+        
+        row_dict = dict(zip(headers, parts[:len(headers)]))
+        
+        # Cleanup math
+        for col in ['Định mức', 'Thực lĩnh']:
+            if col in row_dict:
+                row_dict[col] = evaluate_math(row_dict[col])
+                
+        data.append(row_dict)
+        
+    return data
+
 def flatten_data(data):
-    """
-    Hàm xử lý tách dòng (Post-processing):
-    Nếu một dòng có nhiều mã đơn hàng (order_numbers), tách thành nhiều dòng.
-    """
+    """Hàm xử lý tách dòng (Post-processing) dành cho Hóa đơn/Chứng từ"""
     flattened = []
     for item in data:
         order_nums = item.get('order_numbers', [])
         
-        # Nếu order_numbers là mảng và có dữ liệu
         if isinstance(order_nums, list) and len(order_nums) > 0:
-            
-            # Helper: Safely parse float
             def get_val(key):
                 v = item.get(key)
                 try: 
@@ -140,34 +218,22 @@ def flatten_data(data):
             
             val_actual = get_val('quantity_actual')
             val_doc = get_val('quantity_doc')
-            
-            # Logic thông minh: Kiểm tra số lượng dựa trên thực tế trước, sau đó mới đến chứng từ
-            # Trong phiếu xuất kho, "Thực xuất" (actual) quan trọng hơn.
             target_qty = val_actual if val_actual is not None else val_doc
             
             count_codes = len(order_nums)
             is_count_match = (target_qty == count_codes) if target_qty is not None else False
             
-            # Tạo dòng mới cho từng mã
             for code in order_nums:
                 new_item = item.copy()
-                new_item['order_numbers'] = str(code) # Chuyển thành chuỗi để hiển thị
+                new_item['order_numbers'] = str(code) 
                 
-                # Nếu khớp số lượng (VD: 3 mã, SL Thực=3) -> Mỗi dòng là 1 cái
                 if is_count_match:
-                    # Set value to 1 ONLY if the original value was not None
-                    if val_actual is not None:
-                        new_item['quantity_actual'] = 1
-                    if val_doc is not None:
-                        new_item['quantity_doc'] = 1
-                        
-                    # Recalculate Total Price -> Unit Price
-                    if new_item.get('unitprice'):
-                        new_item['totalprice'] = new_item.get('unitprice')
+                    if val_actual is not None: new_item['quantity_actual'] = 1
+                    if val_doc is not None: new_item['quantity_doc'] = 1
+                    if new_item.get('unitprice'): new_item['totalprice'] = new_item.get('unitprice')
                 
                 flattened.append(new_item)
         else:
-            # Nếu không có mã hoặc định dạng sai, giữ nguyên
             if isinstance(order_nums, list):
                 item['order_numbers'] = ", ".join(map(str, order_nums))
             flattened.append(item)
@@ -176,21 +242,40 @@ def flatten_data(data):
 
 @app.get("/")
 def read_root():
-    return {"status": "Online", "message": f"Server running with Google {MODEL_NAME}"}
+    return {"status": "Online", "message": "Server is running."}
 
 @app.post("/extract")
-async def extract_document(file: UploadFile = File(...)):
-    print(f"\n--> Receiving file: {file.filename}")
+async def extract_document(
+    file: UploadFile = File(...), 
+    mode: str = Form("standard")
+):
+    print(f"\n--> Receiving file: {file.filename} | Mode: {mode}")
     
     try:
         file_bytes = await file.read()
+        is_material_mode = (mode == "material_list")
         
-        # --- XỬ LÝ FILE: PDF hoặc ẢNH ---
+        # --- CONFIG ROUTING ---
+        system_prompt = MATERIAL_LIST_PROMPT if is_material_mode else STANDARD_PROMPT
+        target_url = GEMINI_URL_PRO if is_material_mode else GEMINI_URL_FLASH
+        target_model_name = "gemini-2.5-pro" if is_material_mode else "gemini-2.5-flash-lite"
+        
         image_parts = []
-        
-        # 1. Nếu là PDF -> Convert TẤT CẢ các trang sang Ảnh
-        if file.filename.lower().endswith(".pdf"):
-            print("   Detected PDF. Converting all pages to images...")
+
+        # --- PREPARE PAYLOAD ---
+        if is_material_mode and file.filename.lower().endswith(".pdf"):
+            # PRO MODE: Pass Raw PDF Bytes directly for reasoning
+            print(f"   Using {target_model_name} with direct PDF upload.")
+            encoded_pdf = base64.b64encode(file_bytes).decode("utf-8")
+            image_parts.append({
+                "inline_data": {
+                    "mime_type": "application/pdf",
+                    "data": encoded_pdf
+                }
+            })
+        elif file.filename.lower().endswith(".pdf"):
+            # STANDARD MODE: Convert to Images
+            print(f"   Converting PDF to images for {target_model_name}...")
             images_bytes_list = pdf_to_images(file_bytes)
             
             for img_bytes in images_bytes_list:
@@ -201,10 +286,9 @@ async def extract_document(file: UploadFile = File(...)):
                         image.thumbnail((MAX_SIZE, MAX_SIZE))
                     
                     buffered = io.BytesIO()
-                    if image.mode in ("RGBA", "P"): 
-                        image = image.convert("RGB")
-                    
+                    if image.mode in ("RGBA", "P"): image = image.convert("RGB")
                     image.save(buffered, format="JPEG", quality=85)
+                    
                     encoded_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
                     image_parts.append({
                         "inline_data": {
@@ -213,21 +297,17 @@ async def extract_document(file: UploadFile = File(...)):
                         }
                     })
                 except Exception as img_err:
-                    print(f"   Image Processing Warning for PDF page: {img_err}")
                     pass
         else:
-            # 2. Nếu là Ảnh
+            # NORMAL IMAGE HANDLING
             try:
                 image = Image.open(io.BytesIO(file_bytes))
                 MAX_SIZE = 3072 
                 if max(image.size) > MAX_SIZE:
-                    print(f"   Resize: Original size {image.size} -> Scaling to max {MAX_SIZE}px...")
                     image.thumbnail((MAX_SIZE, MAX_SIZE))
                     
                 buffered = io.BytesIO()
-                if image.mode in ("RGBA", "P"): 
-                    image = image.convert("RGB")
-                
+                if image.mode in ("RGBA", "P"): image = image.convert("RGB")
                 image.save(buffered, format="JPEG", quality=85)
                 encoded_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
                 image_parts.append({
@@ -236,72 +316,60 @@ async def extract_document(file: UploadFile = File(...)):
                         "data": encoded_image
                     }
                 })
-            except Exception as img_err:
-                print(f"   Image Processing Warning: {img_err}.")
-                # Cứu cánh: gửi byte gốc nếu lỗi xử lý PIL
+            except Exception as e:
+                # Fallback to direct bytes
                 encoded_image = base64.b64encode(file_bytes).decode("utf-8")
-                mime_type = "image/png" if file.filename.lower().endswith(".png") else "image/jpeg"
-                image_parts.append({
-                    "inline_data": {
-                        "mime_type": mime_type,
-                        "data": encoded_image
-                    }
-                })
+                mime = "image/png" if file.filename.lower().endswith(".png") else "image/jpeg"
+                image_parts.append({"inline_data": {"mime_type": mime, "data": encoded_image}})
 
-        # 3. Chuẩn bị dữ liệu gửi Google Gemini API
+        # --- CALL GOOGLE API ---
         payload = {
             "contents": [{
-                "parts": [
-                    { "text": SYSTEM_PROMPT }
-                ] + image_parts
+                "parts": [{"text": system_prompt}] + image_parts
             }],
             "generationConfig": {
                 "temperature": 0.1,
-                "response_mime_type": "application/json"
+                # JSON Format only required for Standard Mode. Material uses raw text parser.
+                "response_mime_type": "text/plain" if is_material_mode else "application/json"
             }
         }
 
-        print(f"--> Sending {len(image_parts)} image(s) to Google Gemini ({MODEL_NAME})...")
-        response = requests.post(GEMINI_URL, json=payload)
+        print(f"--> Calling {target_model_name}...")
+        response = requests.post(target_url, json=payload)
 
         if response.status_code != 200:
             raise HTTPException(status_code=response.status_code, detail=f"Gemini API Error: {response.text}")
 
-        # 4. Xử lý kết quả
         result_json = response.json()
         
         try:
             raw_response = result_json["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError):
-             print("DUMP:", json.dumps(result_json, indent=2))
              raise HTTPException(status_code=500, detail="Gemini returned unexpected structure.")
 
         print(f"--> Response received ({len(raw_response)} chars).")
-
-        # 5. Làm sạch JSON
-        clean_text = raw_response.replace("```json", "").replace("```", "").strip()
         
-        try:
-            extracted_data = json.loads(clean_text)
-            if isinstance(extracted_data, dict):
-                extracted_data = [extracted_data]
-            
-            # --- ÁP DỤNG LOGIC TÁCH DÒNG ---
-            processed_data = flatten_data(extracted_data)
-            
+        # --- PROCESS RESULT ---
+        if is_material_mode:
+            # Parse CSV Logic
+            processed_data = parse_material_csv(raw_response)
             return {"data": processed_data}
-        except json.JSONDecodeError:
-            print("JSON Parsing Failed. Raw AI Response:\n", raw_response)
-            return {
-                "data": [],
-                "error": "Failed to parse JSON.",
-                "raw_text": raw_response
-            }
+        else:
+            # Parse JSON Logic (Standard)
+            clean_text = raw_response.replace("```json", "").replace("```", "").strip()
+            try:
+                extracted_data = json.loads(clean_text)
+                if isinstance(extracted_data, dict):
+                    extracted_data = [extracted_data]
+                processed_data = flatten_data(extracted_data)
+                return {"data": processed_data}
+            except json.JSONDecodeError:
+                return {"data": [], "error": "Failed to parse JSON.", "raw_text": raw_response}
 
     except Exception as e:
         print(f"Server Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    print(f"Starting Gemini Proxy Server on http://localhost:8000 using {MODEL_NAME}")
+    print(f"Starting Gemini Proxy Server on port 8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)
