@@ -47,7 +47,7 @@ You are an expert OCR engine. Analyze the image and extract data into JSON.
 - **id**: Document Number (Số phiếu).
 - **name**: Deliverer/Supplier Name.
 - **code**: Product Code (Mã số).
-- **unit**: Unit (e.g., Cái, Kg).
+- **unit**: Unit (e.g., Cái, Kg, Chiếc, Lít, m3).
 - **unitprice**: Number.
 - **totalprice**: Number.
 
@@ -102,14 +102,16 @@ Return ONLY a raw JSON Array. Do not include markdown blocks like ```json.
 ]
 """
 
-def pdf_to_image_bytes(file_bytes):
-    """Chuyển trang đầu tiên của PDF thành bytes ảnh PNG"""
+def pdf_to_images(file_bytes):
+    """Chuyển tất cả các trang của PDF thành danh sách bytes ảnh PNG"""
+    images = []
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         if doc.page_count > 0:
-            page = doc.load_page(0) # Lấy trang đầu tiên
-            pix = page.get_pixmap(dpi=300) # DPI 200 là đủ nét
-            return pix.tobytes("png")
+            for page in doc:
+                pix = page.get_pixmap(dpi=300) # DPI 300 là đủ nét
+                images.append(pix.tobytes("png"))
+            return images
         else:
             raise Exception("PDF has no pages.")
     except Exception as e:
@@ -184,55 +186,74 @@ async def extract_document(file: UploadFile = File(...)):
         file_bytes = await file.read()
         
         # --- XỬ LÝ FILE: PDF hoặc ẢNH ---
-        final_image_bytes = None
-        mime_type = "image/jpeg" # Mặc định
+        image_parts = []
         
-        # 1. Nếu là PDF -> Convert sang Ảnh
+        # 1. Nếu là PDF -> Convert TẤT CẢ các trang sang Ảnh
         if file.filename.lower().endswith(".pdf"):
-            print("   Detected PDF. Converting first page to image...")
-            final_image_bytes = pdf_to_image_bytes(file_bytes)
-            mime_type = "image/png"
+            print("   Detected PDF. Converting all pages to images...")
+            images_bytes_list = pdf_to_images(file_bytes)
+            
+            for img_bytes in images_bytes_list:
+                try:
+                    image = Image.open(io.BytesIO(img_bytes))
+                    MAX_SIZE = 3072 
+                    if max(image.size) > MAX_SIZE:
+                        image.thumbnail((MAX_SIZE, MAX_SIZE))
+                    
+                    buffered = io.BytesIO()
+                    if image.mode in ("RGBA", "P"): 
+                        image = image.convert("RGB")
+                    
+                    image.save(buffered, format="JPEG", quality=85)
+                    encoded_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                    image_parts.append({
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": encoded_image
+                        }
+                    })
+                except Exception as img_err:
+                    print(f"   Image Processing Warning for PDF page: {img_err}")
+                    pass
         else:
             # 2. Nếu là Ảnh
-            final_image_bytes = file_bytes
-            if file.filename.lower().endswith(".png"):
-                mime_type = "image/png"
-
-        # --- TỐI ƯU HÓA ẢNH ---
-        # Gemini xử lý được ảnh lớn nên ta có thể để max size cao hơn (2048px)
-        try:
-            image = Image.open(io.BytesIO(final_image_bytes))
-            MAX_SIZE = 2048 
-            if max(image.size) > MAX_SIZE:
-                print(f"   Resize: Original size {image.size} -> Scaling to max {MAX_SIZE}px...")
-                image.thumbnail((MAX_SIZE, MAX_SIZE))
-                
+            try:
+                image = Image.open(io.BytesIO(file_bytes))
+                MAX_SIZE = 3072 
+                if max(image.size) > MAX_SIZE:
+                    print(f"   Resize: Original size {image.size} -> Scaling to max {MAX_SIZE}px...")
+                    image.thumbnail((MAX_SIZE, MAX_SIZE))
+                    
                 buffered = io.BytesIO()
                 if image.mode in ("RGBA", "P"): 
                     image = image.convert("RGB")
                 
                 image.save(buffered, format="JPEG", quality=85)
-                final_image_bytes = buffered.getvalue()
-                mime_type = "image/jpeg"
-        except Exception as img_err:
-            print(f"   Image Processing Warning: {img_err}. Using original bytes.")
-            pass
-        
-        # Encode to Base64
-        encoded_image = base64.b64encode(final_image_bytes).decode("utf-8")
+                encoded_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                image_parts.append({
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": encoded_image
+                    }
+                })
+            except Exception as img_err:
+                print(f"   Image Processing Warning: {img_err}.")
+                # Cứu cánh: gửi byte gốc nếu lỗi xử lý PIL
+                encoded_image = base64.b64encode(file_bytes).decode("utf-8")
+                mime_type = "image/png" if file.filename.lower().endswith(".png") else "image/jpeg"
+                image_parts.append({
+                    "inline_data": {
+                        "mime_type": mime_type,
+                        "data": encoded_image
+                    }
+                })
 
         # 3. Chuẩn bị dữ liệu gửi Google Gemini API
         payload = {
             "contents": [{
                 "parts": [
-                    { "text": SYSTEM_PROMPT },
-                    {
-                        "inline_data": {
-                            "mime_type": mime_type,
-                            "data": encoded_image
-                        }
-                    }
-                ]
+                    { "text": SYSTEM_PROMPT }
+                ] + image_parts
             }],
             "generationConfig": {
                 "temperature": 0.1,
@@ -240,7 +261,7 @@ async def extract_document(file: UploadFile = File(...)):
             }
         }
 
-        print(f"--> Sending image to Google Gemini ({MODEL_NAME})...")
+        print(f"--> Sending {len(image_parts)} image(s) to Google Gemini ({MODEL_NAME})...")
         response = requests.post(GEMINI_URL, json=payload)
 
         if response.status_code != 200:
