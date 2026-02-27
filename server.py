@@ -110,13 +110,18 @@ MATERIAL_LIST_PROMPT = """
 You are a data conversion engine. Convert this Bill of Materials PDF into a clean CSV.
         
         CRITICAL DATA EXTRACTION RULES:
-        1.  **Columns:** STT | Tên vật tư | Quy cách | ĐVT | Định mức | Thực lĩnh | Chênh lệch | Ghi chú
+        1.  **Columns:** Tên bảng | Mã code | STT | Tên vật tư | Quy cách | ĐVT | Định mức | Thực lĩnh | Chênh lệch | Ghi chú
         
-        2.  **Fix "STT" (Sequence):** Capture "A", "B", "C" for headers and "1", "2", "3" for items.
-            - **CRITICAL:** Preserve rows that have an STT number but are otherwise empty. 
-            - Example: If the PDF shows a row number "20" with no other text, output: `20|||||||`
+        2.  **Extract "Tên bảng" (List Name) & "Mã code" (Order Number):**
+            - Look for the list name at the top left of the document/table (e.g., "BẢNG KÊ VẬT TƯ BỘ ĐO LƯỜNG (MOF)", "Bảng kê vật tư máy biến áp"). Put this in the "Tên bảng" column.
+            - Look for the order number/code at the top left (e.g., "27B123", "26D 486-489"). Put this in the "Mã code" column.
+            - If a page does NOT have a name or order number, it belongs to the previous list. You MUST repeat the EXACT same "Tên bảng" and "Mã code" from the previous rows to link them together.
             
-        3.  **Fix "Định mức" (Rated) & "Thực lĩnh" (Actual) - STRICT RULE:** - In the PDF, usually two numbers are stacked in the quantity area.
+        3.  **Fix "STT" (Sequence):** Capture "A", "B", "C" for headers and "1", "2", "3" for items.
+            - **CRITICAL:** Preserve rows that have an STT number but are otherwise empty. 
+            - Example: If the PDF shows a row number "20" with no other text, output: `BẢNG KÊ...|27B123|20|||||||`
+            
+        4.  **Fix "Định mức" (Rated) & "Thực lĩnh" (Actual) - STRICT RULE:** - In the PDF, usually two numbers are stacked in the quantity area.
             - **Case A (Two Numbers Found):** The FIRST/TOP number is "Định mức". The SECOND/BOTTOM number is "Thực lĩnh". (They may be different values).
             - **Case B (One Number Found):** If only one number is visible, it is "Định mức". Leave "Thực lĩnh" EMPTY.
             - **Case C (Empty):** If no numbers are found, leave both empty.
@@ -124,13 +129,13 @@ You are a data conversion engine. Convert this Bill of Materials PDF into a clea
             
             - **Cleanup:** Convert all commas to dots (e.g., "20,5" -> "20.5"). Remove symbols like "v", "V", or "/" attached to numbers (e.g., "1v" -> "1").
         
-        4.  **Fix "Quy cách" (Specification):** Combine stacked text into one line (e.g., "45 0.27").
+        5.  **Fix "Quy cách" (Specification):** Combine stacked text into one line (e.g., "45 0.27").
         
-        5.  **Output Format:** - Pipe separated (|). 
+        6.  **Output Format:** - Pipe separated (|). 
             - No markdown. 
             - First line MUST be the header.
 
-        6.  **Handwriting Quirks (BE CAREFUL):**
+        7.  **Handwriting Quirks (BE CAREFUL):**
             - Workers have messy handwriting. Pay close attention to stroke patterns.
             - "1" is often written with a heavy top hook, making it look like "4" or "7".
             - **Row Line Interference (CRITICAL):** If a "1" is written too low, the printed horizontal line separating the rows might cross through it. This visual overlap makes the "1" look exactly like a "4". If the horizontal bar of a suspected "4" perfectly aligns with the table's row border, it is actually a "1".
@@ -138,15 +143,11 @@ You are a data conversion engine. Convert this Bill of Materials PDF into a clea
             - **Logical check:** "Thực lĩnh" is usually equal to or very close to "Định mức". If "Định mức" is 10, and the handwritten "Thực lĩnh" looks like "40" or "70", it is almost certainly "10". Use common sense based on the row context.
 
         Example Output:
-        STT|Tên vật tư|Quy cách|ĐVT|Định mức|Thực lĩnh|Chênh lệch|Ghi chú
-        A|TÔN SILIC||||||
-        1|Tôn TU|45 x 0.27|Kg|20.5|20.5||
-        2|Tôn TI|45 0.27|Kg|5.1|5.4||
-        3|Dây Teflon|2.5mm2|m|10|14||
-        4|Dây Khác|Type C|m|5|||
-        5|||||||
-        6|||||||
-        7|Vật tư cộng thêm|Loại 1|cái|1|2||
+        Tên bảng|Mã code|STT|Tên vật tư|Quy cách|ĐVT|Định mức|Thực lĩnh|Chênh lệch|Ghi chú
+        BẢNG KÊ VẬT TƯ MOF|27B123|A|TÔN SILIC||||||
+        BẢNG KÊ VẬT TƯ MOF|27B123|1|Tôn TU|45 x 0.27|Kg|20.5|20.5||
+        BẢNG KÊ VẬT TƯ MOF|27B123|2|Tôn TI|45 0.27|Kg|5.1|5.4||
+        BẢNG KÊ MÁY BIẾN ÁP|26D 486-489|1|Dây Teflon|2.5mm2|m|10|14||
 """
 
 def pdf_to_images(file_bytes):
@@ -181,31 +182,85 @@ def parse_material_csv(raw_text):
     
     def evaluate_math(val_str):
         val_str = str(val_str).strip().replace('v', '').replace('V', '').replace('✓', '').replace('/', '')
+        
+        # Handle Addition
         if '+' in val_str:
             try:
-                total = sum(float(i.strip()) for i in val_str.split('+') if i.strip())
+                total = sum(float(i.strip().replace(',', '.')) for i in val_str.split('+') if i.strip())
                 return int(total) if total.is_integer() else total
             except Exception:
-                return val_str
+                pass
+                
+        # Handle Multiplication (x or *)
+        val_str_mult = val_str.lower().replace('*', 'x')
+        if 'x' in val_str_mult:
+            try:
+                parts = [float(i.strip().replace(',', '.')) for i in val_str_mult.split('x') if i.strip()]
+                if parts:
+                    total = 1.0
+                    for p in parts:
+                        total *= p
+                    return int(total) if total.is_integer() else total
+            except Exception:
+                pass
+                
         return val_str
 
-    data = []
+    grouped_data = {}
+    ordered_keys = []
+    last_valid_key = ("Bảng kê vật tư", "N/A")
+
     for line in clean_lines[1:]:
         parts = [p.strip() for p in line.split('|')]
         # Pad parts just in case
         while len(parts) < len(headers):
             parts.append("")
         
-        row_dict = dict(zip(headers, parts[:len(headers)]))
+        full_row_dict = dict(zip(headers, parts[:len(headers)]))
+        
+        # Extract Grouping Keys and separate them from actual row data
+        list_name = ""
+        order_number = ""
+        row_dict = {}
+        
+        for k, v in full_row_dict.items():
+            k_upper = k.upper()
+            if "TÊN BẢNG" in k_upper or "LIST NAME" in k_upper:
+                list_name = v
+            elif "MÃ CODE" in k_upper or "ORDER NUMBER" in k_upper:
+                order_number = v
+            else:
+                row_dict[k] = v
         
         # Cleanup math
         for col in ['Định mức', 'Thực lĩnh']:
             if col in row_dict:
                 row_dict[col] = evaluate_math(row_dict[col])
                 
-        data.append(row_dict)
+        # Carry over logic if AI misses repeating them on next page
+        if not list_name and not order_number:
+            list_name, order_number = last_valid_key
+        else:
+            if not list_name: list_name = last_valid_key[0]
+            if not order_number: order_number = last_valid_key[1]
+            last_valid_key = (list_name, order_number)
+            
+        key = (list_name, order_number)
+        if key not in grouped_data:
+            grouped_data[key] = []
+            ordered_keys.append(key)
         
-    return data
+        grouped_data[key].append(row_dict)
+        
+    result = []
+    for key in ordered_keys:
+        result.append({
+            "list_name": key[0],
+            "order_number": key[1],
+            "data": grouped_data[key]
+        })
+        
+    return result
 
 def flatten_data(data):
     """Hàm xử lý tách dòng (Post-processing) dành cho Hóa đơn/Chứng từ"""
