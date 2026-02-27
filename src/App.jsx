@@ -20,6 +20,9 @@ export default function App() {
   const [isResizing, setIsResizing] = useState(false);
   const compareContainerRef = useRef(null);
 
+  // State to track which Material List order number cell is being edited
+  const [editingCodeIdx, setEditingCodeIdx] = useState(null);
+
   const [serverUrl, setServerUrl] = useState(DEFAULT_LOCAL_URL);
   const [showSettings, setShowSettings] = useState(false);
   const [isServerActive, setIsServerActive] = useState(false);
@@ -241,13 +244,31 @@ export default function App() {
             const parsedData = result.data || [];
 
             if (extractionMode === 'material_list') {
-                // Thêm vào History View
-                currentHistoryBatch.push({
-                    id: crypto.randomUUID(),
-                    file: file,
-                    fileName: file.name,
-                    data: parsedData 
-                });
+                // Determine if backend returned the new grouped format
+                const isMultiList = Array.isArray(parsedData) && parsedData.length > 0 && parsedData[0].hasOwnProperty('list_name');
+                
+                if (isMultiList) {
+                    parsedData.forEach(listObj => {
+                        currentHistoryBatch.push({
+                            id: crypto.randomUUID(),
+                            file: file,
+                            fileName: file.name,
+                            listName: listObj.list_name || 'Bảng kê không tên',
+                            orderNumber: listObj.order_number || 'N/A',
+                            data: listObj.data 
+                        });
+                    });
+                } else {
+                    // Fallback for older single-array format
+                    currentHistoryBatch.push({
+                        id: crypto.randomUUID(),
+                        file: file,
+                        fileName: file.name,
+                        listName: 'Bảng kê',
+                        orderNumber: '',
+                        data: parsedData 
+                    });
+                }
             } else {
                  const flattenAndInjectInfo = (data) => {
                     return data.flatMap(item => {
@@ -336,7 +357,12 @@ export default function App() {
     const wb = window.XLSX.utils.book_new();
     const ws = window.XLSX.utils.json_to_sheet(item.data);
     window.XLSX.utils.book_append_sheet(wb, ws, 'Bảng kê vật tư');
-    window.XLSX.writeFile(wb, `${item.fileName.replace(/\.[^/.]+$/, "")}.xlsx`);
+    
+    let baseName = item.fileName.replace(/\.[^/.]+$/, "");
+    let addon = item.orderNumber && item.orderNumber !== 'N/A' ? `_${item.orderNumber}` : '';
+    addon = addon.replace(/[/\\?%*:|"<>]/g, '-'); // Sanitize filename
+    
+    window.XLSX.writeFile(wb, `${baseName}${addon}.xlsx`);
   };
 
   const exportToCSV = () => {
@@ -357,6 +383,15 @@ export default function App() {
   const updateRow = (index, field, value) => setExtractedData(prev => {
       const newData = [...prev]; newData[index] = { ...newData[index], [field]: value }; return newData;
   });
+
+  // Handle Editing Material History Info fields (listName, orderNumber)
+  const updateMaterialHistoryItem = (index, field, value) => {
+      setMaterialHistory(prev => {
+          const newData = [...prev];
+          newData[index] = { ...newData[index], [field]: value };
+          return newData;
+      });
+  };
 
   // Handle Editing inside the Compare Modal
   const handleCompareItemChange = (rowIndex, key, newValue) => {
@@ -466,7 +501,7 @@ export default function App() {
                     <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50 shrink-0">
                         <div className="flex items-center gap-2">
                             <Columns className="w-5 h-5 text-indigo-500"/>
-                            <span className="font-semibold text-slate-700 text-lg">So sánh: {compareItem.fileName}</span>
+                            <span className="font-semibold text-slate-700 text-lg">So sánh: {compareItem.listName || compareItem.fileName} {compareItem.orderNumber && compareItem.orderNumber !== 'N/A' ? `(${compareItem.orderNumber})` : ''}</span>
                         </div>
                         <button onClick={() => setCompareItem(null)} className="p-2 hover:bg-slate-200 rounded-full"><X className="w-6 h-6" /></button>
                     </div>
@@ -704,7 +739,9 @@ export default function App() {
                                     <table className="w-full divide-y divide-slate-200 text-sm">
                                         <thead className="bg-slate-50">
                                             <tr>
-                                                <th className="px-4 py-3 text-left font-semibold text-slate-700 uppercase tracking-wider text-xs">Tệp đầu vào (PDF)</th>
+                                                <th className="px-4 py-3 text-left font-semibold text-slate-700 uppercase tracking-wider text-xs w-48">Tệp đầu vào (PDF)</th>
+                                                <th className="px-4 py-3 text-left font-semibold text-slate-700 uppercase tracking-wider text-xs w-64">Tên bảng</th>
+                                                <th className="px-4 py-3 text-left font-semibold text-slate-700 uppercase tracking-wider text-xs">Mã code</th>
                                                 <th className="px-4 py-3 text-center font-semibold text-slate-700 uppercase tracking-wider text-xs w-32">So sánh</th>
                                                 <th className="px-4 py-3 text-center font-semibold text-slate-700 uppercase tracking-wider text-xs w-40">Tải về</th>
                                             </tr>
@@ -713,8 +750,51 @@ export default function App() {
                                             {materialHistory.map((item, idx) => (
                                                 <tr key={item.id || idx} className="hover:bg-indigo-50/30 transition-colors">
                                                     <td className="px-4 py-4 font-medium text-slate-700 flex items-center gap-3">
-                                                        <div className="p-2 bg-red-50 text-red-500 rounded"><FileText className="w-5 h-5" /></div>
-                                                        <span className="truncate">{item.fileName}</span>
+                                                        <div className="p-2 bg-red-50 text-red-500 rounded flex-shrink-0"><FileText className="w-5 h-5" /></div>
+                                                        <span className="truncate max-w-[120px] lg:max-w-[150px]" title={item.fileName}>{item.fileName}</span>
+                                                    </td>
+                                                    <td className="px-2 py-2">
+                                                        <input 
+                                                            type="text" 
+                                                            value={item.listName || ''} 
+                                                            onChange={(e) => updateMaterialHistoryItem(idx, 'listName', e.target.value)}
+                                                            className="w-full px-3 py-2 text-sm font-medium border border-transparent hover:border-slate-300 focus:border-indigo-400 focus:bg-white focus:shadow-sm bg-transparent rounded outline-none text-slate-700 transition-all placeholder:text-slate-300"
+                                                            placeholder="Nhập tên bảng..."
+                                                        />
+                                                    </td>
+                                                    <td className="px-2 py-2 align-middle">
+                                                        {editingCodeIdx === idx ? (
+                                                            <input 
+                                                                autoFocus
+                                                                type="text" 
+                                                                value={item.orderNumber === 'N/A' ? '' : (item.orderNumber || '')} 
+                                                                onChange={(e) => updateMaterialHistoryItem(idx, 'orderNumber', e.target.value)}
+                                                                onBlur={() => setEditingCodeIdx(null)}
+                                                                onKeyDown={(e) => e.key === 'Enter' && setEditingCodeIdx(null)}
+                                                                className="w-full px-3 py-2 text-sm font-semibold border border-indigo-400 focus:border-indigo-500 bg-white shadow-sm rounded outline-none text-indigo-700 placeholder:text-slate-400 placeholder:font-normal transition-all"
+                                                                placeholder="Nhập mã, cách nhau dấu phẩy..."
+                                                            />
+                                                        ) : (
+                                                            <div 
+                                                                onClick={() => setEditingCodeIdx(idx)}
+                                                                className="w-full min-h-[36px] flex flex-wrap gap-1.5 p-2 rounded cursor-text border border-transparent hover:border-slate-300 hover:bg-white transition-colors items-center"
+                                                                title="Nhấp để chỉnh sửa"
+                                                            >
+                                                                {!item.orderNumber || item.orderNumber === 'N/A' || item.orderNumber.trim() === '' ? (
+                                                                    <span className="text-slate-400 text-sm italic">Không có mã...</span>
+                                                                ) : (
+                                                                    item.orderNumber.split(',').map((tag, tIdx) => {
+                                                                        const trimmed = tag.trim();
+                                                                        if (!trimmed) return null;
+                                                                        return (
+                                                                            <span key={tIdx} className="bg-indigo-50 text-indigo-600 border border-indigo-100 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap shadow-sm">
+                                                                                {trimmed}
+                                                                            </span>
+                                                                        );
+                                                                    })
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="px-4 py-4 text-center">
                                                         <button 
