@@ -30,7 +30,7 @@ if not API_KEY:
     print("WARNING: API_KEY not found in environment variables.")
 
 # Define endpoints for different models
-GEMINI_URL_FLASH = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={API_KEY}"
+GEMINI_URL_FLASH = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
 GEMINI_URL_PRO = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={API_KEY}"
 
 # --- PROMPTS ---
@@ -41,7 +41,7 @@ You are an expert OCR engine. Analyze the image and extract data into JSON.
 
 ### 1. EXTRACTION RULES
 - **doc_type**: "Invoice", "Import", or "Export".
-- **date**: DD/MM/YYYY format.
+- **date**: DD/MM/YYYY format. Look for the text like "Ngày ... tháng ... năm ..." located centrally, directly UNDER the document title (doc_type) and ABOVE the document number (id). Example: "Ngày 01 tháng 12 năm 2025" -> "01/12/2025". STRICTLY IGNORE any printed dates on the top right corner (e.g., "ngày 26/08/2016" or "22/12/2014").
 - **id**: Document Number (Số phiếu).
 - **name**: Deliverer/Supplier Name.
 - **code**: Product Code (Mã số).
@@ -49,37 +49,41 @@ You are an expert OCR engine. Analyze the image and extract data into JSON.
 - **unitprice**: Number.
 - **totalprice**: Number.
 
-### 2. QUANTITY COLUMNS (STRICT MAPPING)
-Vietnamese warehouse forms (Phiếu Xuất/Nhập Kho) typically have two quantity columns side-by-side:
-| Yêu cầu (1) | Thực Nhập/Xuất (2) |
+**CRITICAL RULES FOR ROWS TO IGNORE:**
+- You MUST completely ignore the table sub-header row that contains column index symbols like "A", "B", "C", "D", "1", "2", "3", "4" in its cells. This is NOT an actual product/item. DO NOT extract this row into the JSON output. 
+- CRITICAL: DO NOT mistakenly read the index numbers "1" or "2" from this sub-header row as your `quantity_doc` or `quantity_actual` values!
 
-- **quantity_doc**: Number or null. This corresponds to column (1) "Yêu cầu". If this visual column is blank, return `null`.
-- **quantity_actual**: Number or null. This corresponds to column (2) "Thực nhập" or "Thực xuất". If this visual column is blank, return `null`.
+### 2. QUANTITY COLUMNS (STRICT MAPPING & ANTI-SHIFTING)
+Vietnamese warehouse forms (Phiếu Xuất/Nhập Kho) typically have two quantity columns side-by-side under the main "Số lượng" (Quantity) header:
+- Column 1: "Yêu cầu" or "Theo chứng từ". Maps to -> `quantity_doc`
+- Column 2: "Thực xuất" or "Thực nhập". Maps to -> `quantity_actual`
 
-**CRITICAL RULE:** - If the "Yêu cầu" column is empty, and "Thực Xuất" has a number (e.g. 5), you MUST return: `{"quantity_doc": null, "quantity_actual": 5}`.
-- DO NOT put the actual quantity into `quantity_doc`.
+**CRITICAL RULES FOR QUANTITY (PREVENT LAYOUT SHIFT):**
+1. NEVER auto-fill, shift, or copy values between columns. 
+2. BEWARE OF RIGHT-ALIGNED NUMBERS: Numbers in Column 1 ("Theo chứng từ") are often right-aligned, putting them visually very close to Column 2 ("Thực nhập"). You MUST keep them in `quantity_doc`. Do NOT shift them to `quantity_actual`.
+3. NEVER use the column index "1" from the sub-header row (A, B, C, D, 1, 2, 3, 4) as a quantity value.
+4. If Column 1 has a number (e.g., 6) and Column 2 is visually blank, you MUST return: `{"quantity_doc": 6, "quantity_actual": null}`. 
+5. Numbers with spaces (e.g., "3 193" or "5 670") must be extracted as single values ("3193", "5670").
 
 ### 3. SMART DESCRIPTION & ORDER NUMBER PARSING
 You must separate the Item Description from the Serial/Order Numbers.
 
 **Field: `description`**
-- Keep the technical specifications (e.g., "MBA 320KVA - 22/0,4KV").
-- REMOVE the serial numbers/ranges from this string.
+- Extract the FULL item description exactly as written, including all technical specifications, model codes, fractions, and brands (e.g., "Điều chỉnh dưới tải CVIII-350Y/40.5-14271W", "Sứ cao thế mới 35/250- CD 965 Đông Hải").
+- DO NOT trim, cut off, or remove any part of the product name or specifications. 
+- ONLY remove distinct Serial/Order Numbers (e.g., lists of IDs like "25B834, 25B835", "22A023") IF they clearly represent individual instance serials appended at the very end of the text.
 
 **Field: `order_numbers` (Array of Strings)**
-- Extract the specific codes/serials found in the description line.
-- **Prefix Logic:** If a list is "25B827, 828, 621", apply the prefix "25B" to all numbers -> ["25B827", "25B828", "25B621"].
-- **Range Logic:** If a range is "25B834-->838" or "25B834-838", expand it -> ["25B834", "25B835", "25B836", "25B837", "25B838"].
-
-### 4. EXAMPLE SCENARIOS
-**Input Image:** Table row shows Column "Yêu cầu" is empty. Column "Thực Xuất" is 10. Description contains codes 25B834 to 25B838 and 25B840 to 25B844.
-**Output:**
-{
-  "description": "MBA 560KVA - 22/0,4KV",
-  "order_numbers": ["25B834", "25B835", "25B836", "25B837", "25B838", "25B840", "25B841", "25B842", "25B843", "25B844"],
-  "quantity_doc": null,
-  "quantity_actual": 10
-}
+- Extract the specific codes/serials ONLY IF they are physically written directly inside the item's description cell INSIDE THE TABLE.
+- CRITICAL: DO NOT extract codes/serials from the general document "Nội dung" (Content/Reason) section at the top of the page (e.g., "Nhập lại VT tháo ra từ máy MOF 80-40/5A 21C783"). If the table row itself does not contain a code, you MUST return an empty array `[]`.
+- **STRICT PREFIX LOGIC (CRITICAL):** You MUST apply the leading prefix (like "25B", "22A", "25C", etc.) to ALL subsequent numbers in a comma-separated list. 
+  - Example: If the text says "25B827, 828, 621", you MUST output: ["25B827", "25B828", "25B621"]. 
+  - DO NOT output ["25B827", "828", "621"].
+- **STRICT RANGE LOGIC (CRITICAL):** If you see a range with a hyphen/dash or arrow (e.g., "25B834-838", "25B834 - 838", or "25B834-->838"), you MUST calculate and list EVERY intermediate number in the array.
+  - Correct Output for "25B834-838": ["25B834", "25B835", "25B836", "25B837", "25B838"]
+  - INCORRECT Output: ["25B834", "838"] or ["25B834", "25B838"] (You must NOT skip the numbers in between!)
+  - INCORRECT Output: ["25B834-838"] (You must expand it into separate items)
+  - You must explicitly count and generate the full mathematical sequence.
 
 ### OUTPUT FORMAT:
 Return ONLY a raw JSON Array. Do not include markdown blocks like ```json.
@@ -93,7 +97,8 @@ Return ONLY a raw JSON Array. Do not include markdown blocks like ```json.
     "order_numbers": ["Code1", "Code2"],
     "code": "Code",
     "unit": "Unit",
-    "quantity": 10,
+    "quantity_doc": null,
+    "quantity_actual": 10,
     "unitprice": 500000,
     "totalprice": 5000000
   }
@@ -115,7 +120,7 @@ You are a data conversion engine. Convert this Bill of Materials PDF into a clea
             - **Case A (Two Numbers Found):** The FIRST/TOP number is "Định mức". The SECOND/BOTTOM number is "Thực lĩnh". (They may be different values).
             - **Case B (One Number Found):** If only one number is visible, it is "Định mức". Leave "Thực lĩnh" EMPTY.
             - **Case C (Empty):** If no numbers are found, leave both empty.
-            - **Math Addition:** If workers wrote an addition formula like "1+1" or "2 + 1" (e.g., Định mức is 1, Thực lĩnh is 1+1), calculate the total and output ONLY the final sum (e.g., "2").
+            - **Math Operations:** If workers wrote an addition formula like "1+1" or "2 + 1", or a multiplication formula like "4.5x4" or "9 x 5", calculate the total/product and output ONLY the final result (e.g., "2", "18", "45").
             
             - **Cleanup:** Convert all commas to dots (e.g., "20,5" -> "20.5"). Remove symbols like "v", "V", or "/" attached to numbers (e.g., "1v" -> "1").
         
@@ -206,6 +211,16 @@ def flatten_data(data):
     """Hàm xử lý tách dòng (Post-processing) dành cho Hóa đơn/Chứng từ"""
     flattened = []
     for item in data:
+        # BỘ LỌC AN TOÀN KÉP: Loại bỏ nếu AI vô tình bắt dính hàng chỉ mục "A", "B", "C", "D" hoặc hàng Header
+        desc = str(item.get('description', '')).strip().upper()
+        if (desc in ['B', 'C', 'D'] or 
+            'NHÃN HIỆU QUY CÁCH' in desc or 
+            'PHẨM CHẤT VẬT TƯ' in desc or 
+            'SẢN PHẨM, HÀNG' in desc or 
+            'TÊN VẬT TƯ' in desc or
+            'TÊN, NHÃN HIỆU' in desc):
+            continue  # Bỏ qua dòng này hoàn toàn
+
         order_nums = item.get('order_numbers', [])
         
         if isinstance(order_nums, list) and len(order_nums) > 0:
@@ -322,49 +337,81 @@ async def extract_document(
                 mime = "image/png" if file.filename.lower().endswith(".png") else "image/jpeg"
                 image_parts.append({"inline_data": {"mime_type": mime, "data": encoded_image}})
 
-        # --- CALL GOOGLE API ---
-        payload = {
-            "contents": [{
-                "parts": [{"text": system_prompt}] + image_parts
-            }],
-            "generationConfig": {
-                "temperature": 0.1,
-                # JSON Format only required for Standard Mode. Material uses raw text parser.
-                "response_mime_type": "text/plain" if is_material_mode else "application/json"
-            }
-        }
-
-        print(f"--> Calling {target_model_name}...")
-        response = requests.post(target_url, json=payload)
-
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=f"Gemini API Error: {response.text}")
-
-        result_json = response.json()
-        
-        try:
-            raw_response = result_json["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError):
-             raise HTTPException(status_code=500, detail="Gemini returned unexpected structure.")
-
-        print(f"--> Response received ({len(raw_response)} chars).")
-        
-        # --- PROCESS RESULT ---
+        # --- CALL GOOGLE API & PROCESS RESULT ---
         if is_material_mode:
-            # Parse CSV Logic
+            # MATERIAL LIST (PRO MODEL) - One big call
+            payload = {
+                "contents": [{
+                    "parts": [{"text": system_prompt}] + image_parts
+                }],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "response_mime_type": "text/plain"
+                }
+            }
+
+            print(f"--> Calling {target_model_name}...")
+            response = requests.post(target_url, json=payload)
+
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=f"Gemini API Error: {response.text}")
+
+            result_json = response.json()
+            
+            try:
+                raw_response = result_json["candidates"][0]["content"]["parts"][0]["text"]
+            except (KeyError, IndexError):
+                 raise HTTPException(status_code=500, detail="Gemini returned unexpected structure.")
+
+            print(f"--> Response received ({len(raw_response)} chars).")
             processed_data = parse_material_csv(raw_response)
             return {"data": processed_data}
+
         else:
-            # Parse JSON Logic (Standard)
-            clean_text = raw_response.replace("```json", "").replace("```", "").strip()
-            try:
-                extracted_data = json.loads(clean_text)
-                if isinstance(extracted_data, dict):
-                    extracted_data = [extracted_data]
-                processed_data = flatten_data(extracted_data)
-                return {"data": processed_data}
-            except json.JSONDecodeError:
-                return {"data": [], "error": "Failed to parse JSON.", "raw_text": raw_response}
+            # STANDARD MODE (FLASH LITE) - Process page by page
+            print(f"--> Calling {target_model_name} sequentially for {len(image_parts)} pages...")
+            all_extracted_data = []
+            error_logs = []
+
+            for i, img_part in enumerate(image_parts):
+                print(f"    Processing page {i+1}/{len(image_parts)}...")
+                payload = {
+                    "contents": [{
+                        "parts": [{"text": system_prompt}, img_part]
+                    }],
+                    "generationConfig": {
+                        "temperature": 0.1,
+                        "response_mime_type": "application/json"
+                    }
+                }
+
+                response = requests.post(target_url, json=payload)
+                if response.status_code != 200:
+                    print(f"    Page {i+1} API Error: {response.text}")
+                    error_logs.append(f"Page {i+1} failed.")
+                    continue
+
+                result_json = response.json()
+                try:
+                    raw_response = result_json["candidates"][0]["content"]["parts"][0]["text"]
+                    clean_text = raw_response.replace("```json", "").replace("```", "").strip()
+                    page_data = json.loads(clean_text)
+                    
+                    # Ensure it's a list
+                    if isinstance(page_data, dict):
+                        page_data = [page_data]
+                        
+                    all_extracted_data.extend(page_data)
+                except Exception as e:
+                    print(f"    Page {i+1} JSON Parse Error: {str(e)}")
+                    error_logs.append(f"Page {i+1} parsing failed.")
+
+            if not all_extracted_data and error_logs:
+                return {"data": [], "error": "Failed to extract data: " + ", ".join(error_logs)}
+
+            # Apply flattening logic to the combined results
+            processed_data = flatten_data(all_extracted_data)
+            return {"data": processed_data}
 
     except Exception as e:
         print(f"Server Error: {str(e)}")
