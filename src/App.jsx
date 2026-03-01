@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Download, FileText, Image as ImageIcon, AlertCircle, X, Loader, Plus, Trash2, Save, Settings, Layers, ClipboardList, Columns, FileDown, FolderInput, ListPlus, Eraser, WifiOff, Eye, Server } from 'lucide-react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 const DEFAULT_LOCAL_URL = "https://unoratorical-geophysical-jarrod.ngrok-free.dev/extract";
 
@@ -826,6 +827,7 @@ export default function App() {
           </div>
         </div>
       </div>
+      <SpeedInsights />
     </div>
   );
 }
