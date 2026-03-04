@@ -7,6 +7,7 @@ import requests
 import io
 import fitz  # PyMuPDF: Dùng để xử lý PDF
 import os
+import concurrent.futures
 from PIL import Image
 from dotenv import load_dotenv
 
@@ -30,7 +31,7 @@ if not API_KEY:
     print("WARNING: API_KEY not found in environment variables.")
 
 # Define endpoints for different models
-GEMINI_URL_FLASH = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
+GEMINI_URL_FLASH = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={API_KEY}"
 GEMINI_URL_PRO = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={API_KEY}"
 
 # --- PROMPTS ---
@@ -157,7 +158,8 @@ def pdf_to_images(file_bytes):
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         if doc.page_count > 0:
             for page in doc:
-                pix = page.get_pixmap(dpi=300) 
+                # Giảm DPI từ 300 xuống 200 để tránh tràn bộ nhớ (OOM) với các file lớn
+                pix = page.get_pixmap(dpi=200) 
                 images.append(pix.tobytes("jpeg"))
             return images
         else:
@@ -394,7 +396,7 @@ async def extract_document(
 
         # --- CALL GOOGLE API & PROCESS RESULT ---
         if is_material_mode:
-            # MATERIAL LIST (PRO MODEL) - One big call
+            # MATERIAL LIST (PRO MODEL) - One big call (Giữ nguyên, không thay đổi)
             payload = {
                 "contents": [{
                     "parts": [{"text": system_prompt}] + image_parts
@@ -423,13 +425,13 @@ async def extract_document(
             return {"data": processed_data}
 
         else:
-            # STANDARD MODE (FLASH LITE) - Process page by page
-            print(f"--> Calling {target_model_name} sequentially for {len(image_parts)} pages...")
+            # STANDARD MODE (FLASH LITE) - Cập nhật xử lý song song (Concurrency)
+            print(f"--> Calling {target_model_name} concurrently for {len(image_parts)} pages...")
             all_extracted_data = []
             error_logs = []
 
-            for i, img_part in enumerate(image_parts):
-                print(f"    Processing page {i+1}/{len(image_parts)}...")
+            # Hàm con để xử lý từng trang một cách riêng biệt
+            def process_single_page(img_part, index):
                 payload = {
                     "contents": [{
                         "parts": [{"text": system_prompt}, img_part]
@@ -439,27 +441,38 @@ async def extract_document(
                         "response_mime_type": "application/json"
                     }
                 }
-
-                response = requests.post(target_url, json=payload)
-                if response.status_code != 200:
-                    print(f"    Page {i+1} API Error: {response.text}")
-                    error_logs.append(f"Page {i+1} failed.")
-                    continue
-
-                result_json = response.json()
                 try:
+                    response = requests.post(target_url, json=payload)
+                    if response.status_code != 200:
+                        return None, f"Page {index+1} API Error: {response.text}"
+                    
+                    result_json = response.json()
                     raw_response = result_json["candidates"][0]["content"]["parts"][0]["text"]
                     clean_text = raw_response.replace("```json", "").replace("```", "").strip()
                     page_data = json.loads(clean_text)
                     
-                    # Ensure it's a list
                     if isinstance(page_data, dict):
                         page_data = [page_data]
-                        
-                    all_extracted_data.extend(page_data)
+                    return page_data, None
                 except Exception as e:
-                    print(f"    Page {i+1} JSON Parse Error: {str(e)}")
-                    error_logs.append(f"Page {i+1} parsing failed.")
+                    return None, f"Page {index+1} JSON Parse Error: {str(e)}"
+
+            # Sử dụng ThreadPoolExecutor để chạy song song tối đa 3-5 request cùng lúc
+            # Dùng executor.map để vẫn GIỮ NGUYÊN THỨ TỰ (từ trang 1 đến trang cuối) khi trả về frontend
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                # Tạo list params: tuple(image_part, index)
+                params = [(img, idx) for idx, img in enumerate(image_parts)]
+                
+                # Gọi API song song
+                results = executor.map(lambda p: process_single_page(p[0], p[1]), params)
+                
+                # Gom kết quả theo đúng thứ tự
+                for page_data, err in results:
+                    if err:
+                        error_logs.append(err)
+                        print(f"    {err}")
+                    elif page_data:
+                        all_extracted_data.extend(page_data)
 
             if not all_extracted_data and error_logs:
                 return {"data": [], "error": "Failed to extract data: " + ", ".join(error_logs)}
