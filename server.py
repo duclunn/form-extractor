@@ -126,7 +126,7 @@ You are a data conversion engine. Convert this Bill of Materials PDF into a clea
             - **Case A (Two Numbers Found):** The FIRST/TOP number is "Định mức". The SECOND/BOTTOM number is "Thực lĩnh". (They may be different values).
             - **Case B (One Number Found):** If only one number is visible, it is "Định mức". Leave "Thực lĩnh" EMPTY.
             - **Case C (Empty):** If no numbers are found, leave both empty.
-            - **Math Operations:** If workers wrote an addition formula like "1+1" or "2 + 1", or a multiplication formula like "4.5x4" or "9 x 5", calculate the total/product and output ONLY the final result (e.g., "2", "18", "45").
+            - **Math Operations:** If workers wrote an addition formula like "1+1" or "2 + 1", a multiplication formula like "4.5x4", OR a subtraction formula like "5-2" or "10 - 3" (indicating refunded items), calculate the final mathematical result and output ONLY the final result (e.g., "2", "18", "3").
             
             - **Cleanup:** Convert all commas to dots (e.g., "20,5" -> "20.5"). Remove symbols like "v", "V", or "/" attached to numbers (e.g., "1v" -> "1").
         
@@ -190,6 +190,18 @@ def parse_material_csv(raw_text):
             try:
                 total = sum(float(i.strip().replace(',', '.')) for i in val_str.split('+') if i.strip())
                 return int(total) if total.is_integer() else total
+            except Exception:
+                pass
+                
+        # Handle Subtraction (e.g. 5-2)
+        if '-' in val_str and not val_str.startswith('-'):
+            try:
+                parts = [float(i.strip().replace(',', '.')) for i in val_str.split('-') if i.strip()]
+                if len(parts) > 1:
+                    total = parts[0]
+                    for p in parts[1:]:
+                        total -= p
+                    return int(total) if total.is_integer() else total
             except Exception:
                 pass
                 
